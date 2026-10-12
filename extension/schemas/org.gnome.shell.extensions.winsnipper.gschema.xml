@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.winsnipper" path="/org/gnome/shell/extensions/winsnipper/">
+    <key name="snip-shortcut" type="as"><default>['&lt;Shift&gt;&lt;Super&gt;s']</default><summary>Start a snip</summary></key>
+    <key name="save-to-disk" type="b"><default>true</default><summary>Save screenshots to the pictures directory</summary></key>
+    <key name="save-directory" type="s"><default>''</default><summary>Save directory (empty means Pictures/Screenshots)</summary></key>
+    <key name="toast-timeout" type="i"><default>7</default><range min="0" max="2147483647"/><summary>Toast duration in seconds (zero means persistent)</summary></key>
+    <key name="default-mode" type="s"><default>'rectangle'</default><choices><choice value="rectangle"/><choice value="window"/><choice value="fullscreen"/></choices><summary>Initial snip mode</summary></key>
+  </schema>
+</schemalist>

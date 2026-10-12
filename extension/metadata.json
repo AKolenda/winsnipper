@@ -1,0 +1,8 @@
+{
+    "uuid": "winsnipper@winsnipper.local",
+    "name": "WinSnipper",
+    "description": "Freeze, select, copy, and annotate screenshots with Super+Shift+S.",
+    "shell-version": ["45", "46", "47", "48", "49"],
+    "settings-schema": "org.gnome.shell.extensions.winsnipper",
+    "version": 1
+}

@@ -1,0 +1,25 @@
+.winsnipper-shade { background-color: rgba(0, 0, 0, 0.4); }
+.winsnipper-selection { border: 2px solid white; background-color: transparent; }
+.winsnipper-toolbar {
+    padding: 6px; spacing: 4px; border-radius: 12px;
+    background-color: #242424; color: white;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+.winsnipper-tool { padding: 10px 14px; border-radius: 8px; }
+.winsnipper-tool:hover, .winsnipper-tool:focus { background-color: #454545; }
+.winsnipper-tool:checked { background-color: #2469b4; }
+.winsnipper-size {
+    background-color: rgba(0, 0, 0, 0.8); color: white;
+    border-radius: 5px; padding: 4px 8px; font-size: 12px;
+}
+.winsnipper-toast {
+    padding: 12px; spacing: 8px; border-radius: 12px;
+    background-color: #242424; color: white;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.35);
+}
+.winsnipper-toast-content { spacing: 12px; }
+.winsnipper-toast-title { font-weight: bold; font-size: 14px; }
+.winsnipper-toast-body { font-size: 12px; color: #d0d0d0; padding-top: 4px; }
+.winsnipper-toast-close { padding: 4px 6px; border-radius: 5px; }
+.winsnipper-toast-close:hover, .winsnipper-toast-close:focus { background-color: #454545; }
