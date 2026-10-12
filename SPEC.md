@@ -62,8 +62,12 @@ File names: `Screenshot From YYYY-MM-DD HH-MM-SS.png` (append ` (2)`, ` (3)` …
 ### Editor activation (called by the extension)
 - Prewarm when the toast appears: `org.freedesktop.Application.ActivateAction('prewarm', [], {})`
   on `io.github.winsnipper.Editor` `/io/github/winsnipper/Editor` (D-Bus activation starts the process).
-  Must not show any window.
-- Open on toast click: `org.freedesktop.Application.Open(['file:///…png'], '', {})`.
+  Must not show any window. Once the file is saved, call
+  `ActivateAction('prewarm-path', [<s absolute-path>], {})` to decode it in the editor's executor.
+  This string action also accepts an empty string for process-only prewarm. The original
+  parameterless action remains supported. Validated images are cached for up to two minutes
+  by resolved path, mtime_ns, and size, and consumed on open when the key still matches.
+- Open on toast click: `org.freedesktop.Application.Open(['file:///…png'], {})` (`(asa{sv})`).
 - All calls async; failures logged, never thrown into the shell.
 - Fallback if D-Bus activation fails: spawn `~/.local/bin/winsnipper-editor <path>` via `GLib.spawn_async`/`Gio.Subprocess`.
 
@@ -82,7 +86,7 @@ File names: `Screenshot From YYYY-MM-DD HH-MM-SS.png` (append ` (2)`, ` (3)` …
    capture time, in stacking order); click captures that rectangle from the frozen image.
 6. Fullscreen: click anywhere captures the whole frozen image (all monitors).
 7. On finish: destroy overlay & pop modal IMMEDIATELY, then encode PNG
-   (`Shell.Screenshot.composite_to_stream`), set clipboard, write file async, show toast.
+   (`Shell.Screenshot.composite_to_stream`), set clipboard, show toast, and write file async.
    HiDPI/fractional scaling: selection is in stage (logical) coords; crop in texture pixels using the
    capture scale exactly like gnome-shell's own `ui/screenshot.js` does.
 
@@ -90,7 +94,8 @@ File names: `Screenshot From YYYY-MM-DD HH-MM-SS.png` (append ` (2)`, ` (3)` …
 - Bottom-right of the primary monitor's work area (above Zorin's bottom panel), 16 px margin.
 - Thumbnail + "Snip copied to clipboard" + "Select here to mark up and share." + small ✕.
 - Slides/fades in; auto-hides after `toast-timeout`; hovering pauses the timer.
-- Click → open editor with the file, dismiss toast. A new snip replaces an existing toast.
+- Click → dismiss toast, await its pending save, then open the editor with the resulting file.
+  If saving fails, report the error without opening. A new snip replaces an existing toast.
 
 ### Editor (Python, GTK 4, no libadwaita requirement)
 - Opens the PNG, window sized to image (max ~85% of monitor), image fit-to-window.

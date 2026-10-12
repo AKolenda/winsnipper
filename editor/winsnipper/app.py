@@ -5,7 +5,7 @@ from pathlib import Path
 import cairo
 
 from .gtk_support import Gio, GLib, Gtk, dispatch, show_error
-from .render import BaseImage
+from .loading import ImageLoader
 
 APPLICATION_ID = "io.github.winsnipper.Editor"
 
@@ -17,7 +17,8 @@ class EditorApplication(Gtk.Application):
         self.set_inactivity_timeout(20 * 60 * 1000)
         self.windows_by_path = {}
         self.loading = set()
-        self._open_filter = None
+        self.loader = ImageLoader()
+        self._prewarm_expiry = None
         self.connect("window-removed", self._window_removed)
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="snip-io")
 
@@ -26,48 +27,14 @@ class EditorApplication(Gtk.Application):
             if existing is window:
                 del self.windows_by_path[path]
 
-    def do_dbus_register(self, connection, object_path):
-        registered = Gtk.Application.do_dbus_register(self, connection, object_path)
-        if registered:
-            self._open_filter = connection.add_filter(self._compat_open, object_path)
-        return registered
-
-    def do_dbus_unregister(self, connection, object_path):
-        if self._open_filter is not None:
-            connection.remove_filter(self._open_filter)
-            self._open_filter = None
-        Gtk.Application.do_dbus_unregister(self, connection, object_path)
-
-    def _compat_open(self, connection, message, incoming, object_path):
-        # GApplication's standard freedesktop Open takes (uris, platform_data).
-        # SPEC.md and the Shell client use (uris, hint, platform_data), normally
-        # the org.gtk.Application signature. Accept that exact contract too,
-        # without replacing GApplication's normal exported interfaces/actions.
-        if (incoming and message.get_message_type() == Gio.DBusMessageType.METHOD_CALL
-                and message.get_path() == object_path
-                and message.get_interface() == "org.freedesktop.Application"
-                and message.get_member() == "Open"
-                and message.get_signature() == "assa{sv}"):
-            uris, hint, _platform_data = message.get_body().unpack()
-
-            def opened():
-                self.do_open([Gio.File.new_for_uri(uri) for uri in uris], len(uris), hint)
-                if not message.get_flags() & Gio.DBusMessageFlags.NO_REPLY_EXPECTED:
-                    try:
-                        connection.send_message(message.new_method_reply(), Gio.DBusSendMessageFlags.NONE)
-                    except GLib.Error:
-                        pass  # caller disconnected
-            # Filters run on GDBus's worker thread; GTK/GApplication calls run
-            # only after dispatching back to the main context.
-            dispatch(opened)
-            return None
-        return message
-
     def do_startup(self):
         Gtk.Application.do_startup(self)
         action = Gio.SimpleAction.new("prewarm", None)
         action.connect("activate", self._prewarm)
         self.add_action(action)
+        path_action = Gio.SimpleAction.new("prewarm-path", GLib.VariantType.new("s"))
+        path_action.connect("activate", self._prewarm_path)
+        self.add_action(path_action)
         for name, accelerators in {
             "win.undo": ["<Primary>z"],
             "win.redo": ["<Primary><Shift>z", "<Primary>y"],
@@ -87,6 +54,31 @@ class EditorApplication(Gtk.Application):
         # application itself while any application windows are open.
         self.hold()
         self.release()
+
+    def _prewarm_path(self, _action, parameter):
+        self._prewarm()
+        path = parameter.get_string()
+        if not path:
+            return
+        self.hold()
+        future = self.executor.submit(self.loader.load, path, True)
+
+        def completed():
+            try:
+                future.result()
+            except (OSError, ValueError, cairo.Error):
+                pass  # Speculative load: no dialog and no window.
+            finally:
+                if self._prewarm_expiry is not None:
+                    GLib.source_remove(self._prewarm_expiry)
+                self._prewarm_expiry = GLib.timeout_add_seconds(121, self._expire_prewarm)
+                self.release()
+        future.add_done_callback(lambda _future: dispatch(completed))
+
+    def _expire_prewarm(self):
+        self._prewarm_expiry = None
+        self.loader.expire()
+        return GLib.SOURCE_REMOVE
 
     def do_activate(self):
         window = self.get_active_window()
@@ -113,16 +105,7 @@ class EditorApplication(Gtk.Application):
         self.loading.add(path)
         self.hold()
 
-        def load():
-            if not path.is_file():
-                raise OSError("The screenshot is missing or is not a regular file.")
-            if path.stat().st_size >= 256 * 1024 * 1024:
-                raise OSError("The screenshot is too large (the limit is 256 MiB).")
-            if path.suffix.lower() != ".png":
-                raise OSError("Please select a PNG screenshot.")
-            return BaseImage.from_png(path)
-
-        future = self.executor.submit(load)
+        future = self.executor.submit(self.loader.load, path)
 
         def completed():
             self.loading.remove(path)
@@ -174,5 +157,8 @@ class EditorApplication(Gtk.Application):
             dialog.show()
 
     def do_shutdown(self):
+        if self._prewarm_expiry is not None:
+            GLib.source_remove(self._prewarm_expiry)
+            self._prewarm_expiry = None
         self.executor.shutdown(wait=False)
         Gtk.Application.do_shutdown(self)

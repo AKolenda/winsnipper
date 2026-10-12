@@ -88,6 +88,8 @@ class SelectionOverlay extends St.Widget {
 
     open() {
         Main.uiGroup.add_child(this);
+        // Capture has already resolved: close popup grabs before taking ours.
+        Main.layoutManager.emit('system-modal-opened');
         this._grab = Main.pushModal(this, {actionMode: Shell.ActionMode.NONE});
         if (this._grab.get_seat_state() !== Clutter.GrabState.ALL)
             throw new Error('Could not acquire the snip input grab');
@@ -179,9 +181,15 @@ class SelectionOverlay extends St.Widget {
             return;
         this._border.set_position(x, y);
         this._border.set_size(sw, sh);
-        this._label.set_text(`${Math.round(sw)} × ${Math.round(sh)}`);
-        const [, lw] = this._label.get_preferred_width(-1);
-        const [, lh] = this._label.get_preferred_height(lw);
+        const text = `${Math.round(sw)} × ${Math.round(sh)}`;
+        if (text !== this._sizeText) {
+            this._sizeText = text;
+            this._label.set_text(text);
+            [, this._labelWidth] = this._label.get_preferred_width(-1);
+            [, this._labelHeight] = this._label.get_preferred_height(this._labelWidth);
+        }
+        const lw = this._labelWidth;
+        const lh = this._labelHeight;
         this._label.set_position(Math.min(x, w - lw), y >= lh + 8 ? y - lh - 8 : Math.min(h - lh, y + sh + 8));
     }
 

@@ -40,7 +40,7 @@ function harness() {
         complete() { this.close(); this.finish({x: 1, y: 2, width: 3, height: 4}); }
     }
     class Toast {
-        constructor() { events.push('toast:new'); }
+        constructor(_pixbuf, _timeout, open) { events.push('toast:new'); this.open = open; }
         connect() {}
         showToast() { events.push('toast:show'); }
         close() { events.push('toast:close'); }
@@ -48,14 +48,17 @@ function harness() {
     const context = {
         Extension: Base,
         Gio: {Cancellable: class { cancel() { events.push('io:cancel'); } }},
-        Meta: {KeyBindingFlags: {NONE: 0}},
+        Meta: {KeyBindingFlags: {IGNORE_AUTOREPEAT: 1}},
         Shell: {Screenshot: class {}, ActionMode: {NORMAL: 1, OVERVIEW: 2}},
-        Main: {layoutManager: layout, wm: {
-            addKeybinding() { events.push('keybinding:add'); },
+        Main: {layoutManager: layout, overview: {visible: false}, wm: {
+            addKeybinding(_name, _settings, flags) { assert.equal(flags, 1); events.push('keybinding:add'); },
             removeKeybinding() { events.push('keybinding:remove'); },
         }},
         global: {stage: {width: 1920, height: 1080}, display},
-        EditorClient: class { prewarm() { events.push('editor:prewarm'); } },
+        EditorClient: class {
+            prewarm(path = '') { events.push(path ? `editor:prewarm:${path}` : 'editor:prewarm'); }
+            open(path) { events.push(`editor:open:${path}`); }
+        },
         ShellService: class { destroy() { events.push('dbus:destroy'); } },
         SelectionOverlay: Overlay,
         SnipToast: Toast,
@@ -70,7 +73,7 @@ function harness() {
     const extension = new Controller();
     extension.enable();
     events.length = 0;
-    return {extension, events, captures, layout,
+    return {extension, events, captures, layout, display, context,
         encoder(value) { encoder = value; }, saver(value) { saver = value; },
         snapshot(value) { snapshot = value; }};
 }
@@ -89,7 +92,7 @@ test('capture is requested before snapshot/overlay, and reentrant shortcuts are 
     extension.disable();
 });
 
-test('completion closes overlay before encoding, writes before toast and prewarm, then unlocks', async () => {
+test('completion closes overlay before encoding, shows toast and warms the saved path, then unlocks', async () => {
     const {extension, events, captures} = harness();
     extension._startSnip();
     captures[0].resolve(['frozen texture', 2]);
@@ -98,7 +101,7 @@ test('completion closes overlay before encoding, writes before toast and prewarm
     extension._startSnip();
     assert.equal(captures.length, 1, 'shortcut remains locked while completion is pending');
     await flush();
-    assert.deepEqual(events.slice(4), ['overlay:close', 'encode', 'save', 'toast:new', 'toast:show', 'editor:prewarm']);
+    assert.deepEqual(events.slice(4), ['overlay:close', 'encode', 'save', 'toast:new', 'toast:show', 'editor:prewarm', 'editor:prewarm:/tmp/shot.png']);
     extension._startSnip();
     assert.equal(captures.length, 2);
     extension.disable();
@@ -115,7 +118,7 @@ test('disable during capture prevents overlay and releases every registered reso
     await flush();
     assert.deepEqual(events, afterDisable);
     for (const event of ['io:cancel', 'keybinding:remove', 'disconnect:monitors-changed',
-        'disconnect:workareas-changed', 'dbus:destroy'])
+        'dbus:destroy'])
         assert.ok(events.includes(event), event);
 });
 
@@ -150,7 +153,7 @@ test('disable during encoding prevents all later save/toast/editor activity', as
     assert.deepEqual(h.events, afterDisable);
 });
 
-test('disable during file writing prevents toast and prewarm', async () => {
+test('disable during file writing closes the early toast and prevents later prewarm', async () => {
     const h = harness();
     const writing = deferred();
     h.saver(() => writing.promise);
@@ -202,4 +205,84 @@ test('capture or encoding failure logs an error and permits retry', async () => 
     h.extension.disable();
     h.captures[2].resolve(['late', 1]);
     await flush();
+});
+
+
+test('toast appears before save resolves; an early click awaits the saved path', async () => {
+    const h = harness();
+    const writing = deferred();
+    h.saver(() => writing.promise);
+    h.extension._startSnip();
+    h.captures[0].resolve(['texture', 1]);
+    await flush();
+    h.extension._overlay.complete();
+    await flush();
+    assert.ok(h.events.includes('toast:show'));
+    assert.ok(!h.events.some(e => e.startsWith('editor:open:')));
+    const clicked = h.extension._toast.open();
+    await flush();
+    assert.ok(!h.events.some(e => e.startsWith('editor:open:')));
+    writing.resolve('/tmp/ready.png');
+    await clicked;
+    await flush();
+    assert.ok(h.events.includes('editor:open:/tmp/ready.png'));
+    assert.ok(h.events.includes('editor:prewarm:/tmp/ready.png'));
+    h.extension.disable();
+});
+
+test('failed save reports once and never opens or decodes a path after an early click', async () => {
+    const h = harness();
+    const writing = deferred();
+    h.saver(() => writing.promise);
+    h.extension._startSnip();
+    h.captures[0].resolve(['texture', 1]);
+    await flush();
+    h.extension._overlay.complete();
+    await flush();
+    const clicked = h.extension._toast.open();
+    writing.reject(new Error('disk full'));
+    await clicked;
+    await flush();
+    assert.equal(h.events.filter(e => e === 'error:Could not encode or save snip').length, 1);
+    assert.ok(!h.events.some(e => e.startsWith('editor:open:') || e.startsWith('editor:prewarm:')));
+    assert.equal(h.extension._busy, false);
+    h.extension.disable();
+});
+
+test('disable while an early click awaits save prevents editor activation', async () => {
+    const h = harness();
+    const writing = deferred();
+    h.saver(() => writing.promise);
+    h.extension._startSnip();
+    h.captures[0].resolve(['texture', 1]);
+    await flush();
+    h.extension._overlay.complete();
+    await flush();
+    const clicked = h.extension._toast.open();
+    h.extension.disable();
+    writing.resolve('/tmp/late.png');
+    await clicked;
+    assert.ok(!h.events.some(e => e.startsWith('editor:open:')));
+});
+
+test('workarea changes are not connected; monitor changes still cancel a live selection', async () => {
+    const h = harness();
+    assert.equal(h.display['workareas-changed'], undefined);
+    h.extension._startSnip();
+    h.captures[0].resolve(['texture', 1]);
+    await flush();
+    h.layout['monitors-changed']();
+    assert.ok(h.events.includes('overlay:close'));
+    h.extension.disable();
+});
+
+test('overview snips offer no window targets (frame rects do not match the clones)', async () => {
+    const {extension, events, captures, context} = harness();
+    context.Main.overview.visible = true;
+    extension._startSnip();
+    assert.deepEqual(events, ['capture']);
+    captures[0].resolve(['frozen texture', 1]);
+    await flush();
+    assert.equal(extension._overlay.windows.length, 0);
+    extension.disable();
 });

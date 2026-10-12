@@ -8,20 +8,23 @@ import tempfile
 from .render import render
 
 
-def atomic_save(path, snapshot):
+def atomic_save(path, snapshot, source=None):
     """Encode completely before replacing the target; failures leave it intact."""
     path = Path(path)
-    surface = render(snapshot)
+    surface = render(snapshot, source=source)
     try:
         mode = stat.S_IMODE(path.stat().st_mode)
     except FileNotFoundError:
         mode = 0o600
     fd, temporary = tempfile.mkstemp(prefix=".winsnipper-", suffix=".png.tmp", dir=path.parent)
     try:
-        with os.fdopen(fd, "wb") as output:
-            os.fchmod(output.fileno(), mode)
-            surface.write_to_png(output)
-            output.flush()
+        try:
+            os.fchmod(fd, mode)
+        finally:
+            os.close(fd)
+        # A filename lets cairo/libpng encode without Python chunk callbacks.
+        surface.write_to_png(temporary)
+        with open(temporary, "rb") as output:
             os.fsync(output.fileno())
         os.replace(temporary, path)
     finally:
@@ -51,6 +54,8 @@ class SaveCoordinator:
         self.executor = executor or ThreadPoolExecutor(max_workers=1, thread_name_prefix="snip-save")
         self._owns_executor = executor is None
         self.writer = writer
+        self._source_base = None
+        self._source = None
         self._pending = None
         self._running = None
         self._timer = None
@@ -88,9 +93,19 @@ class SaveCoordinator:
             return False
         snapshot, self._pending = self._pending, None
         self._running = snapshot
-        future = self.executor.submit(self.writer, self.path, snapshot)
+        future = self.executor.submit(self._write, snapshot)
         future.add_done_callback(lambda done: self.dispatch(lambda: self._finished(done)))
         return False
+
+    def _write(self, snapshot):
+        # Worker-owned, read-only in use. One save at a time per coordinator;
+        # never share cairo objects with the UI or other windows' workers.
+        if self.writer is not atomic_save:
+            return self.writer(self.path, snapshot)
+        if self._source_base is not snapshot.base:
+            self._source = snapshot.base.surface()
+            self._source_base = snapshot.base
+        return atomic_save(self.path, snapshot, self._source)
 
     def _finished(self, future):
         snapshot, self._running = self._running, None

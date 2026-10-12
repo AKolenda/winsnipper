@@ -2,6 +2,7 @@
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
 import os
+import random
 from pathlib import Path
 import sys
 import tempfile
@@ -12,7 +13,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import cairo
 from winsnipper.model import Document, Rect, Stroke
-from winsnipper.render import BaseImage, Snapshot, ViewCache, hit_stroke, render
+from winsnipper.render import (BaseImage, LiveHighlighter, Snapshot, ViewCache,
+                               flattened_points, hit_stroke, render, stroke_bounds)
 from winsnipper.saving import SaveCoordinator, atomic_save
 
 
@@ -175,6 +177,79 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(bytes(original_surface.get_data()),
                          bytes(render(snapshot(document, base), 0.5).get_data()))
 
+    def test_eraser_bounds_match_segment_only_reference(self):
+        rng = random.Random(17)
+        # Passing an infinite box disables only the new rejection; the exact
+        # existing segment tests and crop clipping remain the reference.
+        everything = Rect(-1e9, -1e9, 2e9, 2e9)
+        for _ in range(200):
+            stroke = Stroke(tuple((rng.uniform(-40, 120), rng.uniform(-30, 90))
+                                  for _ in range(rng.randint(1, 12))), width=rng.uniform(.1, 30))
+            flat = flattened_points(stroke)
+            bounds = stroke_bounds(stroke, flat)
+            start, end = ((rng.uniform(-70, 150), rng.uniform(-60, 120)) for _ in range(2))
+            radius = rng.uniform(0, 15)
+            crop = rng.choice((None, Rect(10, 10, 50, 40)))
+            self.assertEqual(hit_stroke(stroke, start, end, radius, crop, flat, bounds),
+                             hit_stroke(stroke, start, end, radius, crop, flat, everything))
+        dot = Stroke(((20, 20),), width=10)
+        self.assertTrue(hit_stroke(dot, (25.5, 20), radius=0))
+
+    def test_live_highlighter_matches_committed_union_and_provisional_tail(self):
+        rng = random.Random(3)
+        paths = [((20, 20),), ((10, 30), (60, 30), (10, 30), (60, 30)),
+                 tuple((rng.randrange(10, 70), rng.randrange(10, 50)) for _ in range(35))]
+        crop = Rect(5, 5, 70, 50)
+        for scale in (0.45, 1, 2):
+            for points in paths:
+                live = LiveHighlighter(crop, scale, (1, 1, 0), 12)
+                for i, point in enumerate(points):
+                    live.add(point)
+                    state = replace(Document(80, 60).state, crop=crop)
+                    snap = Snapshot(solid_base(), state, 0)
+                    expected = render(replace(snap, state=replace(state, strokes=(
+                        Stroke(points[:i + 1], (1, 1, 0), 12, "highlighter"),))), scale)
+                    actual = render(snap, scale)
+                    context = cairo.Context(actual)
+                    context.scale(scale, scale)
+                    context.translate(-crop.x, -crop.y)
+                    live.draw(context)
+                    actual.flush()
+                    diffs = [abs(a - b) for a, b in zip(actual.get_data().cast('B'),
+                                                       expected.get_data().cast('B'))]
+                    # Local clipping/tessellation and A8 vs ARGB groups can
+                    # differ at antialiased edges; interior coverage is equal.
+                    self.assertLessEqual(max(diffs), 6)
+                    self.assertLess(sum(diffs) / len(diffs), .03)
+
+    def test_live_highlighter_self_overlap_and_separate_strokes_compound(self):
+        live = LiveHighlighter(Rect(0, 0, 80, 60), 1, (1, 1, 0), 12)
+        for point in ((10, 30), (60, 30), (10, 30), (60, 30)):
+            live.add(point)
+        result = render(snapshot(Document(80, 60)))
+        context = cairo.Context(result)
+        live.draw(context)
+        self.assertAlmostEqual(pixel(result, 30, 30)[2], 173, delta=1)
+        live.draw(context)
+        self.assertLess(pixel(result, 30, 30)[2], 173)
+
+    def test_view_cache_reuses_resize_raster_and_mip_keeps_crop_coordinates(self):
+        base = solid_base(160, 120)
+        doc = Document(160, 120)
+        doc.add_stroke(Stroke(((45, 55), (100, 55)), (0, 0, 1), 14))
+        doc.crop(Rect(30, 40, 100, 60))
+        snap = snapshot(doc, base)
+        cache = ViewCache(base)
+        surface = cache.get(snap, .45)
+        version = cache.version
+        self.assertEqual(pixel(surface, 10, 7), (0, 0, 255, 255))
+        self.assertIs(cache.get(snap, cache.reuse_scale(snap, .4)), surface)
+        self.assertEqual(cache.version, version)
+        self.assertIsNot(cache.get(snap, .4), surface)
+        self.assertEqual(cache.version, version + 1)
+        doc.undo()
+        self.assertEqual(cache.reuse_scale(snapshot(doc, base), .3), .3)
+
 
 class FakeLoop:
     def __init__(self):
@@ -270,6 +345,49 @@ class SaveTests(unittest.TestCase):
         path = self.path.parent / ("x" * 251 + ".png")
         atomic_save(path, self.edit())
         self.assertTrue(path.is_file())
+
+    def test_coordinator_reuses_a_source_owned_by_each_coordinator(self):
+        coordinator = self.coordinator()
+        # Patch with an explicit original so cairo still receives a real source.
+        original = BaseImage.surface
+        with patch.object(BaseImage, "surface", autospec=True, side_effect=original) as copied:
+            for _ in range(2):
+                coordinator.request(self.edit())
+                coordinator.flush()
+                self.executor.finish()
+                self.loop.drain()
+            self.assertEqual(copied.call_count, 1)
+        other = self.coordinator()
+        other.request(self.edit())
+        other.flush()
+        self.executor.finish()
+        self.loop.drain()
+        self.assertIsNot(other._source, coordinator._source)
+
+    def test_path_encode_receives_a_filename_and_fsync_failure_cleans_temp(self):
+        original = self.path.read_bytes()
+        with patch("winsnipper.saving.render") as mocked:
+            atomic_save(self.path, self.edit())
+            filename = mocked.return_value.write_to_png.call_args.args[0]
+            self.assertIsInstance(filename, str)
+        self.path.write_bytes(original)
+        with patch("winsnipper.saving.os.fsync", side_effect=OSError("sync failed")):
+            with self.assertRaises(OSError):
+                atomic_save(self.path, self.edit())
+        self.assertEqual(self.path.read_bytes(), original)
+        self.assertEqual(list(self.path.parent.iterdir()), [self.path])
+
+    def test_reused_source_preserves_transparency(self):
+        image = cairo.ImageSurface(cairo.FORMAT_ARGB32, 80, 60)
+        context = cairo.Context(image)
+        context.set_source_rgba(.7, .2, .1, .4)
+        context.paint()
+        base = BaseImage.from_surface(image)
+        snap = snapshot(self.document, base)
+        atomic_save(self.path, snap)
+        original = self.path.read_bytes()
+        atomic_save(self.path, snap, base.surface())
+        self.assertEqual(self.path.read_bytes(), original)
 
     def test_failed_encode_preserves_original_and_cleans_temp(self):
         original = self.path.read_bytes()

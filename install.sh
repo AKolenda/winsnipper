@@ -57,8 +57,6 @@ if [[ ! -f "$SCRIPT_DIR/editor/winsnipper_editor.py" ]]; then
     exit 1
 fi
 
-# Resolve conflicts first; failures preserve the backup and stop installation.
-python3 "$SCRIPT_DIR/tools/keybindings.py" --backup "$DATA_DIR/keybinding-backup.json" disable
 mkdir -p "$EXTENSION_DIR" "$EDITOR_DIR" "$HOME/.local/bin" "$(dirname -- "$DESKTOP")" "$(dirname -- "$SERVICE")" "$DATA_DIR/tools"
 cp -R "$SCRIPT_DIR/extension/." "$EXTENSION_DIR/"
 glib-compile-schemas "$EXTENSION_DIR/schemas"
@@ -88,6 +86,9 @@ desktop.write_text('[Desktop Entry]\nType=Application\nName=WinSnipper Editor\n'
 service.write_text('[D-BUS Service]\nName=io.github.winsnipper.Editor\n'
                    'Exec=' + exec_quote(launcher) + ' --gapplication-service\n')
 PY
+# Only now take over Super+Shift+S, so a failed copy never leaves it unbound.
+# Failures preserve the backup and stop before the extension is enabled.
+python3 "$SCRIPT_DIR/tools/keybindings.py" --backup "$DATA_DIR/keybinding-backup.json" disable
 python3 "$SCRIPT_DIR/tools/keybindings.py" enable-extension
 if command -v gnome-extensions >/dev/null 2>&1; then
     gnome-extensions enable "$UUID" || true

@@ -3,10 +3,12 @@ from dataclasses import replace
 import math
 from pathlib import Path
 
+from .canvas import Canvas
 from .clipboard import set_image
 from .gtk_support import Gdk, Gio, GLib, Gtk, dispatch, schedule, show_error
 from .model import Document, Stroke
-from .render import Snapshot, ViewCache, draw_stroke, flattened_points, hit_stroke
+from .render import (LiveHighlighter, Snapshot, ViewCache, flattened_points,
+                     hit_stroke, stroke_bounds)
 from .saving import SaveCoordinator, atomic_save
 
 PALETTE = (("Black", "#000000"), ("White", "#ffffff"), ("Red", "#e53935"),
@@ -31,6 +33,8 @@ class EditorWindow(Gtk.ApplicationWindow):
         self.zoom = 1.0
         self.fit_mode = True
         self._viewport_size = None
+        self._resize_timer = None
+        self._live_highlighter = None
         self._drag_start = None
         self._drag_tool = None
         self._points = []
@@ -48,8 +52,10 @@ class EditorWindow(Gtk.ApplicationWindow):
                                      self._saved, self._save_error, self.status.set_label,
                                      executor=application.executor)
         self.connect("close-request", self._close_requested)
+        self.connect("destroy", lambda *_: self._cancel_resize())
         self._size_to_image()
-        self.scroller.add_tick_callback(self._viewport_tick)
+        for adjustment in (self.scroller.get_hadjustment(), self.scroller.get_vadjustment()):
+            adjustment.connect("notify::page-size", self._viewport_changed)
         self._update_actions()
 
     def snapshot(self):
@@ -144,8 +150,7 @@ class EditorWindow(Gtk.ApplicationWindow):
         self.set_child(content)
         self.scroller = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
         self.scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        self.area = Gtk.DrawingArea(hexpand=True, vexpand=True, focusable=True)
-        self.area.set_draw_func(self._draw)
+        self.area = Canvas(self)
         self.area.set_cursor_from_name("crosshair")
         self.scroller.set_child(self.area)
         content.append(self.scroller)
@@ -183,16 +188,32 @@ class EditorWindow(Gtk.ApplicationWindow):
         if monitor is not None:
             geometry = monitor.get_geometry()
             width, height = geometry.width, geometry.height
-        self.set_default_size(min(int(width * 0.85), max(760, self.base.width + 32)),
-                              min(int(height * 0.85), max(420, self.base.height + 110)))
+        default_width = min(int(width * 0.85), max(760, self.base.width + 32))
+        default_height = min(int(height * 0.85), max(420, self.base.height + 110))
+        self.set_default_size(default_width, default_height)
+        # Account for the header/footer before the first allocation/present.
+        self._viewport_size = (default_width, max(1, default_height - 110))
+        self._fit_to_size()
 
-    def _viewport_tick(self, _widget, _clock):
-        size = (self.scroller.get_width(), self.scroller.get_height())
+    def _viewport_changed(self, *_args):
+        size = (self.scroller.get_hadjustment().get_page_size(),
+                self.scroller.get_vadjustment().get_page_size())
         if size != self._viewport_size and min(size) > 1:
             self._viewport_size = size
             if self.fit_mode:
+                if self._resize_timer is not None:
+                    GLib.source_remove(self._resize_timer)
+                self._resize_timer = schedule(150, self._resize_settled)
                 self._fit_to_size()
-        return GLib.SOURCE_CONTINUE
+
+    def _resize_settled(self):
+        self._resize_timer = None
+        self.area.queue_draw()
+
+    def _cancel_resize(self):
+        if self._resize_timer is not None:
+            GLib.source_remove(self._resize_timer)
+            self._resize_timer = None
 
     def _fit_to_size(self):
         crop = self.document.state.crop
@@ -203,16 +224,18 @@ class EditorWindow(Gtk.ApplicationWindow):
 
     def _resize_canvas(self):
         crop = self.document.state.crop
-        self.area.set_content_width(math.ceil(crop.width * self.zoom) + 32)
-        self.area.set_content_height(math.ceil(crop.height * self.zoom) + 32)
+        self.area.set_content_size(math.ceil(crop.width * self.zoom) + 32,
+                                   math.ceil(crop.height * self.zoom) + 32)
         self.dimensions.set_label(f"{crop.width} × {crop.height}  ·  {self.zoom * 100:.0f}%")
         self.area.queue_draw()
 
     def fit(self):
+        self._cancel_resize()
         self.fit_mode = True
         self._fit_to_size()
 
     def set_zoom(self, zoom):
+        self._cancel_resize()
         self.fit_mode = False
         self.zoom = max(0.05, min(8.0, zoom))
         self._resize_canvas()
@@ -239,44 +262,18 @@ class EditorWindow(Gtk.ApplicationWindow):
                     max(crop.y, min(crop.bottom, point[1])))
         return point if crop.contains(point) else None
 
-    def _draw(self, _area, context, width, height):
-        # Use the theme's background, without overriding system light/dark settings.
-        found, background = self.get_style_context().lookup_color("theme_bg_color")
-        if found:
-            context.set_source_rgba(background.red, background.green, background.blue, background.alpha)
+    def _ensure_highlighter(self, scale):
+        live = self._live_highlighter
+        if live is None or live.scale != scale or live.crop != self.document.state.crop:
+            live = LiveHighlighter(self.document.state.crop, scale,
+                                   self.colors["highlighter"], self.widths["highlighter"])
+            for point in self._points:
+                live.add(point)
+            self._live_highlighter = live
         else:
-            context.set_source_rgb(0.18, 0.18, 0.18)
-        context.paint()
-        snapshot = self.snapshot()
-        if self._removed:
-            snapshot = replace(snapshot, state=replace(snapshot.state, strokes=tuple(
-                stroke for i, stroke in enumerate(snapshot.state.strokes) if i not in self._removed)))
-        # At high zoom, magnify an original-resolution cache instead of allocating
-        # a potentially gigantic (zoom × 5K) surface.
-        raster_scale = min(1.0, self.zoom * self.area.get_scale_factor())
-        surface = self.cache.get(snapshot, raster_scale)
-        ox, oy = self._origin(width, height)
-        context.save()
-        context.translate(ox, oy)
-        context.scale(self.zoom / raster_scale, self.zoom / raster_scale)
-        context.set_source_surface(surface, 0, 0)
-        context.paint()
-        context.restore()
-        context.save()
-        context.translate(ox, oy)
-        context.scale(self.zoom, self.zoom)
-        crop = snapshot.state.crop
-        context.translate(-crop.x, -crop.y)
-        context.rectangle(crop.x, crop.y, crop.width, crop.height)
-        context.clip()
-        if self._points and self._drag_tool in ("pen", "highlighter"):
-            draw_stroke(context, Stroke(tuple(self._points), self.colors[self._drag_tool],
-                                        self.widths[self._drag_tool], self._drag_tool))
-        if self._drag_tool == "crop" and self._points and self._crop_end is not None:
-            selected = crop.selection(self._points[0], self._crop_end)
-            if selected is not None:
-                self._draw_crop(context, crop, selected)
-        context.restore()
+            for point in self._points[len(live.points):]:
+                live.add(point)
+        return live
 
     def _draw_crop(self, context, crop, rect):
         context.save()
@@ -311,7 +308,9 @@ class EditorWindow(Gtk.ApplicationWindow):
         self._crop_end = point
         self._removed = set()
         if self.tool == "eraser":
-            self._erase_geometry = tuple(flattened_points(s) for s in self.document.state.strokes)
+            self._erase_geometry = tuple((points, stroke_bounds(s, points))
+                                         for s in self.document.state.strokes
+                                         for points in (flattened_points(s),))
             self._erase_at(point, point)
         self._update_actions()
         self.area.queue_draw()
@@ -333,7 +332,8 @@ class EditorWindow(Gtk.ApplicationWindow):
         for index, stroke in enumerate(self.document.state.strokes):
             if index not in self._removed and hit_stroke(
                     stroke, start, end, radius=6 / self.zoom,
-                    crop=self.document.state.crop, flattened=self._erase_geometry[index]):
+                    crop=self.document.state.crop, flattened=self._erase_geometry[index][0],
+                    bounds=self._erase_geometry[index][1]):
                 self._removed.add(index)
 
     def _drag_end(self, gesture, dx, dy):
@@ -369,6 +369,7 @@ class EditorWindow(Gtk.ApplicationWindow):
             self.area.queue_draw()
 
     def _reset_drag(self):
+        self._live_highlighter = None
         self._drag_start = None
         self._drag_tool = None
         self._points = []

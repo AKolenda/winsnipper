@@ -102,7 +102,7 @@ class GtkTests(unittest.TestCase):
         self.spin(lambda: self.window.area.get_width() > 100)
         return self.window
 
-    def test_spec_three_argument_dbus_open_and_cli_forwarding(self):
+    def test_standard_dbus_open_and_cli_forwarding(self):
         responses = []
 
         def callback(source, result):
@@ -114,7 +114,7 @@ class GtkTests(unittest.TestCase):
                 responses.append(None)
         self.connection.call("io.github.winsnipper.Editor", "/io/github/winsnipper/Editor",
                              "org.freedesktop.Application", "Open",
-                             GLib.Variant("(assa{sv})", ([self.path.as_uri()], "", {})), None,
+                             GLib.Variant("(asa{sv})", ([self.path.as_uri()], {})), None,
                              Gio.DBusCallFlags.NONE, 5000, None, callback)
         self.spin(lambda: bool(responses))
         self.assertIsNone(responses[0])
@@ -123,7 +123,7 @@ class GtkTests(unittest.TestCase):
         process = subprocess.Popen([sys.executable, str(Path(__file__).parents[1] / "winsnipper_editor.py"),
                                     str(self.path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.addCleanup(lambda: process.kill() if process.poll() is None else None)
-        self.spin(lambda: process.poll() is not None)
+        self.spin(lambda: process.poll() is not None, timeout=60)
         _stdout, stderr = process.communicate()
         self.assertEqual(process.returncode, 0, stderr)
         self.pump(0.05)
@@ -221,6 +221,166 @@ class GtkTests(unittest.TestCase):
         errors = [w for w in self.application.get_windows() if isinstance(w, Gtk.MessageDialog)]
         self.assertEqual(len(errors), 1)
         errors[0].response(Gtk.ResponseType.CLOSE)
+
+    def record_snapshot(self, window):
+        class Recorder:
+            def __init__(self):
+                self.snapshot = Gtk.Snapshot.new()
+                self.cairo_bounds = []
+                self.blends = []
+                self.textures = []
+            def __getattr__(self, name):
+                return getattr(self.snapshot, name)
+            def append_cairo(self, bounds):
+                self.cairo_bounds.append(bounds)
+                return self.snapshot.append_cairo(bounds)
+            def push_blend(self, blend):
+                self.blends.append(blend)
+                self.snapshot.push_blend(blend)
+            def append_scaled_texture(self, texture, filter, bounds):
+                self.textures.append(texture)
+                self.snapshot.append_scaled_texture(texture, filter, bounds)
+        recorder = Recorder()
+        window.area.do_snapshot(recorder)
+        self.assertIsNotNone(recorder.snapshot.to_paintable(None))
+        return recorder
+
+    def test_texture_reused_during_motion_and_overlay_is_bounded(self):
+        window = self.open_window()
+        self.pump(.2)
+        initial = self.record_snapshot(window)
+        self.assertFalse(initial.cairo_bounds)
+        builds = window.area.texture_builds
+        class Gesture:
+            def set_state(self, _state):
+                pass
+        ox, oy = window._origin()
+        window._drag_begin(Gesture(), ox + 20 * window.zoom, oy + 20 * window.zoom)
+        window._drag_update(None, 100 * window.zoom, 10 * window.zoom)
+        live = self.record_snapshot(window)
+        self.assertEqual(window.area.texture_builds, builds)
+        self.assertEqual(len(live.cairo_bounds), 1)
+        bounds = live.cairo_bounds[0]
+        self.assertLess(bounds.get_width(), 130 * window.zoom)
+        self.assertLess(bounds.get_height(), 40 * window.zoom)
+        self.assertIs(live.textures[0], initial.textures[0])
+        window._finish_gesture()
+        self.record_snapshot(window)
+        self.assertEqual(window.area.texture_builds, builds + 1)
+
+    def test_highlighter_snapshot_blend_crop_scroll_and_input_mapping(self):
+        from winsnipper.canvas import Gsk
+        window = self.open_window()
+        window.set_zoom(2)
+        self.pump(.1)
+        h, v = window.scroller.get_hadjustment(), window.scroller.get_vadjustment()
+        h.set_value(50)
+        v.set_value(60)
+        ox, oy = window._origin()
+        self.assertEqual(window._image_point(ox + 200, oy + 240), (100, 120))
+        window.select_tool("highlighter")
+        class Gesture:
+            def set_state(self, _state):
+                pass
+        window._drag_begin(Gesture(), ox + 100, oy + 100)
+        window._drag_update(None, 120, 80)
+        record = self.record_snapshot(window)
+        self.assertEqual(record.blends, [Gsk.BlendMode.MULTIPLY])
+        b = record.cairo_bounds[0]
+        self.assertGreaterEqual(b.get_x(), h.get_value())
+        self.assertGreaterEqual(b.get_y(), v.get_value())
+        window._drag_cancel()
+        window.select_tool("crop")
+        window._drag_begin(Gesture(), ox + 100, oy + 100)
+        window._drag_update(None, 300, 250)
+        record = self.record_snapshot(window)
+        self.assertFalse(record.blends)
+        self.assertLessEqual(record.cairo_bounds[0].get_width(), h.get_page_size())
+        self.assertLessEqual(record.cairo_bounds[0].get_height(), v.get_page_size())
+        window._finish_gesture()
+        self.pump(.1)
+        ox, oy = window._origin()
+        crop = window.document.state.crop
+        self.assertEqual(window._image_point(ox, oy), (crop.x, crop.y))
+        class Scroll:
+            def get_current_event_state(self):
+                return Gdk.ModifierType.CONTROL_MASK
+        previous = window.zoom
+        self.assertTrue(window._scroll(Scroll(), 0, -1))
+        self.assertGreater(window.zoom, previous)
+
+    def test_fit_resize_debounces_raster_rebuild_without_a_tick_callback(self):
+        window = self.open_window()
+        self.pump(.25)
+        self.record_snapshot(window)
+        version = window.cache.version
+        initial_scale = window.cache.scale
+        h, v = window.scroller.get_hadjustment(), window.scroller.get_vadjustment()
+        for factor in (.95, .9, .85):
+            h.set_page_size(700 * factor)
+            v.set_page_size(450 * factor)
+            self.assertIsNotNone(window._resize_timer)
+            self.record_snapshot(window)
+            self.assertEqual(window.cache.version, version)
+            self.assertEqual(window.cache.scale, initial_scale)
+        # GTK may restore the real allocation after the synthetic notifications.
+        # Restore the last requested fit size at the timeout boundary to test
+        # the raster decision independently of those allocation notifications.
+        window._cancel_resize()
+        window._viewport_size = (595, 382.5)
+        window._fit_to_size()
+        window._resize_settled()
+        self.record_snapshot(window)
+        self.assertEqual(window.cache.version, version + 1)
+        self.assertFalse(hasattr(window, '_viewport_tick'))
+
+    def test_idle_window_does_not_advance_frame_clock(self):
+        window = self.open_window()
+        self.pump(.5)
+        clock = window.get_frame_clock()
+        frame = clock.get_frame_counter()
+        self.pump(.2)
+        self.assertEqual(clock.get_frame_counter(), frame)
+
+    def test_large_image_has_fit_zoom_before_present_and_texture_channel_order(self):
+        large = cairo.ImageSurface(cairo.FORMAT_ARGB32, 3840, 2160)
+        window = EditorWindow(self.application, self.path, BaseImage.from_surface(large))
+        self.addCleanup(window.destroy)
+        self.assertLess(window.zoom, .5)
+        self.assertIsNone(window.cache.surface)
+        self.assertLess(window.area.content_size[0], 3840)
+        # ARGB32 premultiplied texture conversion must preserve red and alpha.
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, 2, 2)
+        context = cairo.Context(surface)
+        context.set_source_rgba(1, 0, 0, .5)
+        context.paint()
+        window.cache.version += 1
+        texture = window.area._texture(surface)
+        output = self.path.with_name('texture.png')
+        texture.save_to_png(str(output))
+        decoded = cairo.ImageSurface.create_from_png(str(output))
+        from test_core import pixel
+        self.assertEqual(pixel(decoded, 0, 0), (128, 0, 0, 128))
+
+    def test_path_prewarm_decodes_hidden_and_open_consumes_it(self):
+        calls = []
+        decoder = self.application.loader.decoder
+        def decode(path):
+            calls.append(path)
+            return decoder(path)
+        with patch.object(self.application.loader, 'decoder', side_effect=decode):
+            self.application.activate_action('prewarm-path', GLib.Variant('s', str(self.path)))
+            self.spin(lambda: bool(self.application.loader._cache))
+            self.assertEqual(self.application.get_windows(), [])
+            self.open_window()
+            self.assertEqual(calls, [self.path])
+        self.application.activate_action('prewarm-path', GLib.Variant('s', ''))
+        bad = self.path.with_name('bad.png')
+        bad.write_bytes(b'not a PNG')
+        self.application.activate_action('prewarm-path', GLib.Variant('s', str(bad)))
+        self.pump(.15)
+        self.assertEqual(len(self.application.get_windows()), 1)
+        self.assertFalse(self.application.loader._inflight)
 
     def test_older_gtk_dialog_and_folder_fallbacks(self):
         window = self.open_window()

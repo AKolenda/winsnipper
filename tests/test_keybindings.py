@@ -111,18 +111,45 @@ class ScanTests(unittest.TestCase):
             self.assertEqual(saved, backup.read_bytes())
             self.assertFalse(any(call[0] == 'set' for call in settings.calls))
 
-    def test_new_reinstall_conflict_keeps_original_backup_and_settings(self):
+    def test_new_reinstall_conflicts_merge_and_preserve_first_originals(self):
+        settings = FakeSettings()
+        original = settings.values.copy()
+        with tempfile.TemporaryDirectory() as directory:
+            backup = Path(directory) / 'backup.json'
+            kb.disable(settings, backup)
+            saved = json.loads(backup.read_text())['bindings']
+            new_key = (kb.MEDIA_SCHEMA, 'new')
+            settings.values[new_key] = "'<Shift><Super>s'"
+            # Re-conflicting recorded keys must keep their very first original.
+            old_key = ('org.gnome.shell.keybindings', 'screenshot')
+            settings.values[old_key] = "['<Super><Shift>s', 'F12']"
+            before = settings.values.copy()
+            before_backup = backup.read_bytes()
+            kb.disable(settings, backup, dry_run=True)
+            self.assertEqual(settings.values, before)
+            self.assertEqual(backup.read_bytes(), before_backup)
+            kb.disable(settings, backup)
+            merged = json.loads(backup.read_text())['bindings']
+            self.assertEqual(merged[:len(saved)], saved)
+            self.assertEqual(merged[-1]['original'], before[new_key])
+            self.assertFalse(kb.scan(settings))
+            kb.restore(settings, backup)
+            self.assertEqual(settings.values[old_key], original[old_key])
+            self.assertEqual(settings.values[new_key], before[new_key])
+
+    def test_failed_backup_merge_leaves_record_and_settings_intact(self):
         settings = FakeSettings()
         with tempfile.TemporaryDirectory() as directory:
             backup = Path(directory) / 'backup.json'
             kb.disable(settings, backup)
-            saved = backup.read_bytes()
             settings.values[(kb.MEDIA_SCHEMA, 'new')] = "'<Shift><Super>s'"
-            before = settings.values.copy()
-            with self.assertRaisesRegex(RuntimeError, 'New shortcut conflicts'):
-                kb.disable(settings, backup)
-            self.assertEqual(backup.read_bytes(), saved)
-            self.assertEqual(settings.values, before)
+            original_backup, original_values = backup.read_bytes(), settings.values.copy()
+            with patch('tools.keybindings.os.replace', side_effect=OSError('disk full')):
+                with self.assertRaises(OSError):
+                    kb.disable(settings, backup)
+            self.assertEqual(backup.read_bytes(), original_backup)
+            self.assertEqual(settings.values, original_values)
+            self.assertEqual(list(backup.parent.iterdir()), [backup])
 
     def test_restore_failure_preserves_backup_for_retry(self):
         settings = FakeSettings()

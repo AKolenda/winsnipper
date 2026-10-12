@@ -29,7 +29,7 @@ export default class WinSnipper extends Extension {
         try {
             this._editor = new EditorClient(this._cancellable, active);
             this._service = new ShellService(() => this._startSnip(), this._cancellable, active);
-            Main.wm.addKeybinding('snip-shortcut', this._settings, Meta.KeyBindingFlags.NONE,
+            Main.wm.addKeybinding('snip-shortcut', this._settings, Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
                 Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW, () => this._startSnip());
             this._keybindingAdded = true;
             const onLayoutChange = () => {
@@ -47,7 +47,6 @@ export default class WinSnipper extends Extension {
                 this._toast = null;
             };
             this._signals.push([Main.layoutManager, Main.layoutManager.connect('monitors-changed', onLayoutChange)]);
-            this._signals.push([global.display, global.display.connect('workareas-changed', onLayoutChange)]);
         } catch (error) {
             this.disable();
             throw error;
@@ -68,7 +67,8 @@ export default class WinSnipper extends Extension {
             token = {cancelled: false, pending: true};
             this._snipToken = token;
             this._selecting = true;
-            const windows = snapshotWindows();
+            // Overview shows scaled clones, not frame rects: no window targets there.
+            const windows = Main.overview.visible ? [] : snapshotWindows();
             const bounds = {x: 0, y: 0, width: global.stage.width, height: global.stage.height};
             const active = () => this._enabled && this._generation === generation && !token.cancelled;
             this._select(capture, windows, bounds, active, token).catch(error => {
@@ -137,12 +137,16 @@ export default class WinSnipper extends Extension {
         const {bytes, pixbuf} = await encodeCapture(content, scale, rect, active);
         if (!active())
             return;
-        const path = await saveCapture(bytes, saveDirectory(this._settings), this._cancellable, active);
-        if (!active())
-            return;
+        const saving = saveCapture(bytes, saveDirectory(this._settings), this._cancellable, active)
+            .catch(error => {
+                if (active())
+                    report('Could not encode or save snip', error);
+                return null;
+            });
         this._toast?.close();
-        this._toast = new SnipToast(pixbuf, this._settings.get_int('toast-timeout'), () => {
-            if (active())
+        this._toast = new SnipToast(pixbuf, this._settings.get_int('toast-timeout'), async () => {
+            const path = await saving;
+            if (path && active())
                 this._editor.open(path);
         });
         const toast = this._toast;
@@ -157,6 +161,9 @@ export default class WinSnipper extends Extension {
             toast.close();
             throw error;
         }
+        const path = await saving;
+        if (path && active())
+            this._editor.prewarm(path);
     }
 
     disable() {

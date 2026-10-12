@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 
 SCHEMAS = (
     'org.gnome.shell.keybindings',
@@ -111,9 +112,21 @@ def disable(settings, backup, dry_run=False):
         known = {(item['schema'], item['key']) for item in saved['bindings']}
         new = [item for item in conflicts if (item['schema'], item['key']) not in known]
         if new:
-            # Never discard someone's only restore record on reinstall.
-            raise RuntimeError('New shortcut conflicts appeared after the original backup. '
-                               'Run uninstall.sh, then install.sh to preserve their originals.')
+            print(f'{"Would merge" if dry_run else "Merging"} {len(new)} new conflicts into: {backup}')
+            if not dry_run:
+                saved['bindings'].extend(new)
+                # Preserve the previous restore record even if writing fails.
+                fd, temporary = tempfile.mkstemp(prefix='.keybinding-backup-', dir=backup.parent)
+                try:
+                    with os.fdopen(fd, 'w') as stream:
+                        json.dump(saved, stream, indent=2)
+                        stream.write('\n')
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    os.replace(temporary, backup)
+                finally:
+                    if os.path.exists(temporary):
+                        os.unlink(temporary)
         print(f'Preserving existing backup: {backup}')
     else:
         print(f'{"Would save" if dry_run else "Saving"} keybinding backup: {backup}')

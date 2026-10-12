@@ -122,15 +122,29 @@ class ViewCache:
         self.surface = None
         self.state = None
         self.scale = None
+        self.version = 0
+        self._half_source = None
+
+    def reuse_scale(self, snapshot, desired):
+        """During a resize, keep the raster until the debounce expires."""
+        return self.scale if self.surface is not None and self.state == snapshot.state else desired
 
     def invalidate(self):
         self.state = None
 
     def get(self, snapshot, scale):
         if self.state != snapshot.state or self.scale != scale:
-            self.surface = render(snapshot, scale, self.source)
+            source = self.source
+            if scale < 0.5:
+                if self._half_source is None:
+                    empty = State((), Rect(0, 0, snapshot.base.width, snapshot.base.height))
+                    self._half_source = render(Snapshot(snapshot.base, empty, snapshot.revision), 0.5, self.source)
+                    self._half_source.set_device_scale(0.5, 0.5)
+                source = self._half_source
+            self.surface = render(snapshot, scale, source)
             self.state = snapshot.state
             self.scale = scale
+            self.version += 1
         return self.surface
 
     def append(self, before, after, stroke):
@@ -141,6 +155,142 @@ class ViewCache:
             draw_stroke(context, stroke)
             self.surface.flush()
             self.state = after
+            self.version += 1
+
+
+def stroke_bounds(stroke, points=None, padding=None):
+    """Conservative image-space bounds, including flattening error for erasing."""
+    points = stroke.points if points is None else points
+    padding = stroke.width / 2 + 0.5 if padding is None else padding
+    left = min(p[0] for p in points) - padding
+    top = min(p[1] for p in points) - padding
+    right = max(p[0] for p in points) + padding
+    bottom = max(p[1] for p in points) + padding
+    return Rect(left, top, right - left, bottom - top)
+
+
+def swept_intersects(bounds, start, end, radius):
+    return not (max(start[0], end[0]) + radius < bounds.x
+                or min(start[0], end[0]) - radius > bounds.right
+                or max(start[1], end[1]) + radius < bounds.y
+                or min(start[1], end[1]) - radius > bounds.bottom)
+
+
+class LiveHighlighter:
+    """One view-resolution A8 union mask with spatially bounded updates.
+
+    A new point settles one quadratic and changes the provisional tail. Replay
+    only curves touching that dirty rectangle, in one cairo stroke, so joins
+    and antialiased self-intersections have the same union coverage as the
+    committed path. Repeated OVER strokes would accumulate edge alpha.
+    """
+
+    def __init__(self, crop, scale, color, width):
+        self.crop, self.scale, self.color, self.width = crop, scale, color, width
+        self.points = []
+        self.bounds = None
+        self.tail_bounds = None
+        self._segments = []
+        self._cells = {}
+        self._cell_size = 64 / scale
+        size = (max(1, math.ceil(crop.width * scale)), max(1, math.ceil(crop.height * scale)))
+        self.mask = cairo.ImageSurface(cairo.FORMAT_A8, *size)
+        self.mask.set_device_scale(scale, scale)
+
+    def _bounds(self, points):
+        padding = self.width / 2 + 2 / self.scale
+        left, top = min(p[0] for p in points) - padding, min(p[1] for p in points) - padding
+        right, bottom = max(p[0] for p in points) + padding, max(p[1] for p in points) + padding
+        return Rect(left, top, right - left, bottom - top)
+
+    def _tiles(self, bounds):
+        size = self._cell_size
+        for x in range(math.floor(bounds.x / size), math.floor(bounds.right / size) + 1):
+            for y in range(math.floor(bounds.y / size), math.floor(bounds.bottom / size) + 1):
+                yield x, y
+
+    @staticmethod
+    def _curve(context, start, control, end):
+        context.curve_to(start[0] + (control[0] - start[0]) * 2 / 3,
+                         start[1] + (control[1] - start[1]) * 2 / 3,
+                         end[0] + (control[0] - end[0]) * 2 / 3,
+                         end[1] + (control[1] - end[1]) * 2 / 3, *end)
+
+    def add(self, point):
+        self.points.append(point)
+        n = len(self.points)
+        if n > 1:
+            control = self.points[-2]
+            start = self.points[0] if n == 2 else tuple(
+                (a + b) / 2 for a, b in zip(self.points[-3], control))
+            end = tuple((a + b) / 2 for a, b in zip(control, point))
+            bounds = self._bounds((start, control, end))
+            index = len(self._segments)
+            self._segments.append((start, control, end, bounds))
+            for cell in self._tiles(bounds):
+                self._cells.setdefault(cell, []).append(index)
+            tail = (end, point)
+        else:
+            tail = (point,)
+        new_bounds = self._bounds(tail)
+        previous = self.tail_bounds or new_bounds
+        left, top = min(previous.x, new_bounds.x), min(previous.y, new_bounds.y)
+        right, bottom = max(previous.right, new_bounds.right), max(previous.bottom, new_bounds.bottom)
+        # Pixel-aligned clearing avoids partially clearing boundary mask pixels.
+        left = self.crop.x + math.floor((left - self.crop.x) * self.scale) / self.scale
+        top = self.crop.y + math.floor((top - self.crop.y) * self.scale) / self.scale
+        right = self.crop.x + math.ceil((right - self.crop.x) * self.scale) / self.scale
+        bottom = self.crop.y + math.ceil((bottom - self.crop.y) * self.scale) / self.scale
+        dirty = Rect(left, top, right - left, bottom - top)
+        context = cairo.Context(self.mask)
+        context.translate(-self.crop.x, -self.crop.y)
+        context.rectangle(dirty.x, dirty.y, dirty.width, dirty.height)
+        context.clip()
+        context.set_operator(cairo.OPERATOR_CLEAR)
+        context.paint()
+        context.set_operator(cairo.OPERATOR_OVER)
+        context.set_source_rgba(1, 1, 1, 1)
+        context.set_line_width(self.width)
+        context.set_line_cap(cairo.LINE_CAP_ROUND)
+        context.set_line_join(cairo.LINE_JOIN_ROUND)
+        indices = {i for cell in self._tiles(dirty) for i in self._cells.get(cell, ())}
+        previous_index = -2
+        for index in sorted(indices):
+            start, control, end, bounds = self._segments[index]
+            if not swept_intersects(bounds, (dirty.x, dirty.y), (dirty.right, dirty.bottom), 0):
+                continue
+            if index != previous_index + 1:
+                context.move_to(*start)
+            self._curve(context, start, control, end)
+            previous_index = index
+        if n == 1:
+            context.arc(*point, self.width / 2, 0, math.tau)
+            context.fill()
+        else:
+            if previous_index != len(self._segments) - 1:
+                context.move_to(*tail[0])
+            self._curve(context, tail[0], point, point)
+            context.stroke()
+        self.tail_bounds = new_bounds
+        if self.bounds is None:
+            self.bounds = new_bounds
+        else:
+            b = self.bounds
+            x, y = min(b.x, new_bounds.x), min(b.y, new_bounds.y)
+            self.bounds = Rect(x, y, max(b.right, new_bounds.right) - x,
+                               max(b.bottom, new_bounds.bottom) - y)
+
+    def draw(self, context, multiply=True):
+        if self.bounds is None:
+            return
+        context.save()
+        b = self.bounds
+        context.rectangle(b.x, b.y, b.width, b.height)
+        context.clip()
+        context.set_operator(cairo.OPERATOR_MULTIPLY if multiply else cairo.OPERATOR_OVER)
+        context.set_source_rgba(*self.color, HIGHLIGHT_ALPHA)
+        context.mask_surface(self.mask, self.crop.x, self.crop.y)
+        context.restore()
 
 
 def flattened_points(stroke, tolerance=0.5):
@@ -201,16 +351,21 @@ def _clip_segment(a, b, rect):
     return ((a[0] + lo * dx, a[1] + lo * dy), (a[0] + hi * dx, a[1] + hi * dy))
 
 
-def hit_stroke(stroke, start, end=None, radius=6.0, crop=None, flattened=None):
+def hit_stroke(stroke, start, end=None, radius=6.0, crop=None, flattened=None, bounds=None):
     """Hit a swept eraser segment, including sparse/fast pointer events."""
     end = start if end is None else end
     reach = radius + stroke.width / 2 + 0.5  # bound on curve flattening error
     points = flattened if flattened is not None else flattened_points(stroke)
+    bounds = stroke_bounds(stroke, points) if bounds is None else bounds
+    if not swept_intersects(bounds, start, end, radius):
+        return False
+    expanded = None
+    if crop is not None:
+        visible_radius = stroke.width / 2 + 0.5
+        expanded = Rect(crop.x - visible_radius, crop.y - visible_radius,
+                        crop.width + visible_radius * 2, crop.height + visible_radius * 2)
     for a, b in zip(points, points[1:] or points):
-        if crop is not None:
-            visible_radius = stroke.width / 2 + 0.5
-            expanded = Rect(crop.x - visible_radius, crop.y - visible_radius,
-                            crop.width + visible_radius * 2, crop.height + visible_radius * 2)
+        if expanded is not None:
             clipped = _clip_segment(a, b, expanded)
             if clipped is None:
                 continue

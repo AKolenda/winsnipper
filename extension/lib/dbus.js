@@ -129,14 +129,16 @@ export class EditorClient {
         this._active = active;
     }
 
-    prewarm() {
-        this._call('ActivateAction', new GLib.Variant('(sava{sv})', ['prewarm', [], {}]),
+    prewarm(path = '') {
+        const action = path ? 'prewarm-path' : 'prewarm';
+        const parameters = path ? [new GLib.Variant('s', path)] : [];
+        this._call('ActivateAction', new GLib.Variant('(sava{sv})', [action, parameters, {}]),
             ['--gapplication-service']);
     }
 
     open(path) {
-        this._call('Open', new GLib.Variant('(assa{sv})',
-            [[Gio.File.new_for_path(path).get_uri()], '', {}]), [path]);
+        this._call('Open', new GLib.Variant('(asa{sv})',
+            [[Gio.File.new_for_path(path).get_uri()], {}]), [path]);
     }
 
     _call(method, parameters, fallbackArgs) {
@@ -145,6 +147,15 @@ export class EditorClient {
         const failed = error => {
             if (!this._active())
                 return;
+            // A slow D-Bus activation may still succeed; spawning would race it.
+            if (error?.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.TIMED_OUT) ||
+                error?.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED) ||
+                error?.matches?.(Gio.DBusError, Gio.DBusError.TIMEOUT) ||
+                error?.matches?.(Gio.DBusError, Gio.DBusError.TIMED_OUT) ||
+                error?.matches?.(Gio.DBusError, Gio.DBusError.NO_REPLY)) {
+                warn(`Editor ${method} did not reply in time`, error);
+                return;
+            }
             warn(`Editor ${method} failed; trying launcher`, error);
             try {
                 const launcher = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'bin', 'winsnipper-editor']);
