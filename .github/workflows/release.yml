@@ -16,11 +16,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
+  release:
     runs-on: [self-hosted, Linux, X64, novapro-ci]
     timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Checks
@@ -41,34 +43,17 @@ jobs:
           dpkg-deb --info "$deb"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "deb=$deb" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: winsnipper-deb
-          path: ${{ steps.deb.outputs.deb }}
-          if-no-files-found: error
-    outputs:
-      version: ${{ steps.deb.outputs.version }}
-
-  release:
-    needs: build
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
-    runs-on: [self-hosted, Linux, X64, novapro-ci]
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: winsnipper-deb
-          path: dist
+      # Same job as the build: no artifact hand-off, so the account's artifact quota never matters.
       - name: Publish release
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.build.outputs.version }}
+          VERSION: ${{ steps.deb.outputs.version }}
+          DEB: ${{ steps.deb.outputs.deb }}
         run: |
           set -Eeuo pipefail
-          gh release create "v$VERSION" dist/*.deb \
+          gh release create "v$VERSION" "$DEB" \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "WinSnipper $VERSION" \
             --notes "Install: \`sudo apt install ./winsnipper_${VERSION}_all.deb\`, then log out and back in. Super+Shift+S is taken over at that login; \`winsnipper-setup --remove\` restores the original shortcut."
