@@ -1,0 +1,74 @@
+name: Test and release .deb
+
+# Every push to master that passes the checks publishes v<VERSION>.<run number>
+# with the .deb attached. Pull requests only run the checks.
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: [self-hosted, Linux, X64, novapro-ci]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checks
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --test tests/*.test.js
+          python3 -m unittest discover -s tests -p 'test_keybindings.py'
+          find extension -name '*.js' -exec node --check {} \;
+          bash -n install.sh uninstall.sh packaging/build-deb.sh packaging/winsnipper-setup
+      - name: Build .deb
+        id: deb
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          version="$(tr -d '[:space:]' < VERSION).${{ github.run_number }}"
+          deb=$(packaging/build-deb.sh "$version" "$RUNNER_TEMP/dist")
+          dpkg-deb --info "$deb"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "deb=$deb" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: winsnipper-deb
+          path: ${{ steps.deb.outputs.deb }}
+          if-no-files-found: error
+    outputs:
+      version: ${{ steps.deb.outputs.version }}
+
+  release:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    runs-on: [self-hosted, Linux, X64, novapro-ci]
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: winsnipper-deb
+          path: dist
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -Eeuo pipefail
+          gh release create "v$VERSION" dist/*.deb \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "WinSnipper $VERSION" \
+            --notes "Install: \`sudo apt install ./winsnipper_${VERSION}_all.deb\`, then log out and back in. Super+Shift+S is taken over at that login; \`winsnipper-setup --remove\` restores the original shortcut."

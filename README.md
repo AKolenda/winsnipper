@@ -3,7 +3,16 @@
 Windows-style snipping for GNOME Shell 45–49, targeting Zorin OS 18 / GNOME 46.
 Works on Wayland and X11. Requires Python 3, PyGObject and GTK 4.
 
-Run `./install.sh` from this checkout. It installs per user without elevated
+**Debian package:** download `winsnipper_*_all.deb` from the latest GitHub release,
+run `sudo apt install ./winsnipper_*_all.deb`, then log out and back in. At that
+login each user's Super+Shift+S is taken over once (conflicts are backed up);
+`winsnipper-setup --remove` restores the original bindings and disables it, and
+`winsnipper-setup` turns it back on. Run `winsnipper-setup --remove` before
+`sudo apt remove winsnipper`. Releases are built by `.github/workflows/release.yml`
+on every push to master (`VERSION` plus the run number); build one locally with
+`packaging/build-deb.sh 0.1.0`.
+
+**From a checkout:** run `./install.sh`. It installs per user without elevated
 privileges, enables the extension and backs up conflicting Super+Shift+S bindings.
 **On Wayland, log out and back in once.** `./install.sh --dry-run` previews actions
 without changing files or settings; dependency checks run during actual installation.

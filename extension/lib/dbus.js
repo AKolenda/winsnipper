@@ -158,7 +158,10 @@ export class EditorClient {
             }
             warn(`Editor ${method} failed; trying launcher`, error);
             try {
-                const launcher = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'bin', 'winsnipper-editor']);
+                // install.sh puts the launcher in ~/.local/bin; the .deb puts it in /usr/bin.
+                const userLauncher = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'bin', 'winsnipper-editor']);
+                const launcher = GLib.file_test(userLauncher, GLib.FileTest.IS_EXECUTABLE)
+                    ? userLauncher : GLib.find_program_in_path('winsnipper-editor') ?? userLauncher;
                 GLib.spawn_async(null, [launcher, ...fallbackArgs], null,
                     GLib.SpawnFlags.DEFAULT, null);
             } catch (spawnError) {

@@ -31,6 +31,7 @@ test('editor uses standard Open and keeps parameterless plus path prewarm', () =
 
 test('editor launcher fallback is skipped when D-Bus only timed out', () => {
     const spawned = [];
+    let executable = ['/home/u/.local/bin/winsnipper-editor', '/usr/bin/winsnipper-editor'];
     const IOErrorEnum = {TIMED_OUT: 24, CANCELLED: 19};
     let failure;
     const EditorClient = vm.runInNewContext(`${source('../extension/lib/dbus.js')}\nEditorClient`, {
@@ -40,6 +41,8 @@ test('editor launcher fallback is skipped when D-Bus only timed out', () => {
         },
         GLib: {
             build_filenamev: parts => parts.join('/'), get_home_dir: () => '/home/u',
+            file_test: path => executable.includes(path), FileTest: {IS_EXECUTABLE: 64},
+            find_program_in_path: name => (executable.includes(`/usr/bin/${name}`) ? `/usr/bin/${name}` : null),
             spawn_async: (_dir, argv) => spawned.push(argv), SpawnFlags: {DEFAULT: 0},
         },
         warn() {},
@@ -51,6 +54,9 @@ test('editor launcher fallback is skipped when D-Bus only timed out', () => {
     failure = {matches: () => false};
     client._call('Open', null, ['/tmp/shot.png']);
     assert.deepEqual(spawned.map(argv => [...argv]), [['/home/u/.local/bin/winsnipper-editor', '/tmp/shot.png']]);
+    executable = ['/usr/bin/winsnipper-editor'];
+    client._call('Open', null, ['/tmp/shot.png']);
+    assert.deepEqual([...spawned[1]], ['/usr/bin/winsnipper-editor', '/tmp/shot.png'], 'the .deb launcher is found on PATH');
 });
 
 function overlayHarness() {
