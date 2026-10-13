@@ -26,10 +26,14 @@ class PortalTests(unittest.TestCase):
         cls.application = EditorApplication("io.github.winsnipper.PortalTests")
         cls.application.register(None)
         cls.connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-        cls.connection.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus",
-                                 "org.freedesktop.DBus", "RequestName",
-                                 GLib.Variant("(su)", ("org.freedesktop.portal.Desktop", 0)),
-                                 None, Gio.DBusCallFlags.NONE, 5000, None)
+        # Do not silently queue behind an autoactivated system portal: every
+        # protocol assertion below must reach this test double on a private bus.
+        reply = cls.connection.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus",
+                                         "org.freedesktop.DBus", "RequestName",
+                                         GLib.Variant("(su)", ("org.freedesktop.portal.Desktop", 4)),
+                                         None, Gio.DBusCallFlags.NONE, 5000, None)
+        if reply.unpack() != (1,):  # DO_NOT_QUEUE must return PRIMARY_OWNER.
+            raise RuntimeError("Portal test name is already owned; use the private test-session-bus.conf")
         cls.info = Gio.DBusNodeInfo.new_for_xml('''<node>
           <interface name="org.freedesktop.portal.Screenshot">
             <method name="Screenshot"><arg type="s" direction="in"/>
