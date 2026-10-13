@@ -5,7 +5,7 @@ import stat
 import threading
 import time
 
-from .render import BaseImage
+from .render import BaseImage, MAX_IMAGE_BYTES
 
 
 def image_key(path):
@@ -13,11 +13,11 @@ def image_key(path):
     info = path.stat()
     if not stat.S_ISREG(info.st_mode):
         raise OSError('The screenshot is missing or is not a regular file.')
-    if info.st_size >= 256 * 1024 * 1024:
+    if info.st_size >= MAX_IMAGE_BYTES:
         raise OSError('The screenshot is too large (the limit is 256 MiB).')
     if path.suffix.lower() != '.png':
         raise OSError('Please select a PNG screenshot.')
-    return path, info.st_mtime_ns, info.st_size
+    return path, info.st_mtime_ns, info.st_size, info.st_dev, info.st_ino, info.st_ctime_ns
 
 
 class ImageLoader:

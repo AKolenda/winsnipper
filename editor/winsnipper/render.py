@@ -1,11 +1,46 @@
 """Pure cairo rendering, shared smoothed geometry, and stroke erasing."""
 from dataclasses import dataclass
+import io
 import math
+import os
+import stat
+import struct
 import cairo
 
 from .model import Rect, State, Stroke
 
 HIGHLIGHT_ALPHA = 0.32
+MAX_IMAGE_BYTES = 256 * 1024 * 1024
+# Up to an 8K desktop, with at most 128 MiB per decoded ARGB surface.
+MAX_IMAGE_PIXELS = 32 * 1024 * 1024
+
+
+def read_png(path):
+    """Read one bounded PNG snapshot before giving it to a native decoder.
+
+    Validate the opened descriptor, not a pathname that can change between
+    stat and open. NONBLOCK keeps a replacement FIFO from hanging a worker.
+    Decoding these immutable bytes also prevents a changed IHDR from bypassing
+    the pixel limit after validation.
+    """
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    with os.fdopen(fd, 'rb') as source:
+        info = os.fstat(source.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise OSError('The screenshot is not a regular file.')
+        if info.st_size >= MAX_IMAGE_BYTES:
+            raise OSError('The screenshot is too large (the limit is 256 MiB).')
+        header = source.read(33)
+        if (len(header) != 33 or header[:8] != b'\x89PNG\r\n\x1a\n'
+                or header[8:16] != b'\x00\x00\x00\rIHDR'):
+            raise OSError('The screenshot does not have a valid PNG header.')
+        width, height = struct.unpack('>II', header[16:24])
+        if width == 0 or height == 0 or width * height > MAX_IMAGE_PIXELS:
+            raise OSError('The screenshot dimensions exceed the 32-megapixel limit.')
+        encoded = header + source.read(MAX_IMAGE_BYTES - len(header))
+        if len(encoded) >= MAX_IMAGE_BYTES:
+            raise OSError('The screenshot is too large (the limit is 256 MiB).')
+        return encoded
 
 
 @dataclass(frozen=True)
@@ -24,7 +59,7 @@ class BaseImage:
 
     @classmethod
     def from_png(cls, path):
-        return cls.from_surface(cairo.ImageSurface.create_from_png(str(path)))
+        return cls.from_surface(cairo.ImageSurface.create_from_png(io.BytesIO(read_png(path))))
 
     def surface(self):
         # Each thread gets its own surface and writable backing storage. The
