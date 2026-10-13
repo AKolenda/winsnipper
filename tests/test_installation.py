@@ -35,12 +35,14 @@ class UserInstallTests(unittest.TestCase):
         self.assertTrue((paths['editor'] / 'winsnipper_editor.py').is_file())
         self.assertFalse((paths['editor'] / 'tests').exists())
         self.assertEqual(paths['launcher'].stat().st_mode & 0o777, 0o755)
+        self.assertIn('Actions=capture;', paths['desktop'].read_text())
+        self.assertIn(' --capture', paths['desktop'].read_text())
         # A Python executable named in PATH cannot intercept the fixed launcher.
         self.assertIn(installer.shlex.quote(installer.sys.executable), paths['launcher'].read_text())
         installer.uninstall()
         self.assertEqual(saved.read_bytes(), b'user capture')
         self.assertTrue(backup.exists())
-        for key in ('editor', 'tools', 'launcher', 'desktop', 'service'):
+        for key in ('editor', 'tools', 'launcher', 'capture_launcher', 'desktop', 'service'):
             self.assertFalse(paths[key].exists(), key)
 
     def test_launcher_quotes_home_metacharacters(self):
@@ -99,11 +101,24 @@ class UserInstallTests(unittest.TestCase):
                     installer.install(ROOT, portable=True)
         self.assertFalse((self.home / '.local').exists())
 
+    def test_mode_selection_and_explicit_overrides(self):
+        cases = [('ubuntu:GNOME', [], 'gnome'), ('KDE', [], 'portable'),
+                 ('GNOME', ['--portable'], 'portable'), ('KDE', ['--gnome'], 'gnome')]
+        for desktop, flags, expected in cases:
+            with self.subTest(desktop=desktop, flags=flags):
+                result = subprocess.run(['bash', str(ROOT / 'install.sh'), '--dry-run', *flags],
+                                        env={**os.environ, 'XDG_CURRENT_DESKTOP': desktop},
+                                        capture_output=True, text=True, check=True)
+                self.assertIn(f'in {expected} mode', result.stdout)
+        result = subprocess.run(['bash', str(ROOT / 'install.sh'), '--dry-run', '--gnome', '--portable'],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+
     def test_install_dry_run_does_not_require_desktop_or_write_files(self):
-        result = subprocess.run(['bash', str(ROOT / 'install.sh'), '--dry-run'],
+        result = subprocess.run(['bash', str(ROOT / 'install.sh'), '--dry-run', '--portable'],
                                 env={**os.environ, 'XDG_CURRENT_DESKTOP': ''}, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('GNOME', result.stdout)
+        self.assertIn('portable', result.stdout)
         self.assertEqual(list(self.home.iterdir()), [])
 
 
@@ -121,20 +136,22 @@ class PackageTests(unittest.TestCase):
         subprocess.run(['dpkg-deb', '--extract', str(cls.deb), str(cls.payload)], check=True)
 
     def test_package_contains_launchers_desktop_service_and_no_tests(self):
-        for name in ('winsnipper-editor', 'winsnipper-setup'):
+        for name in ('winsnipper', 'winsnipper-editor', 'winsnipper-setup'):
             path = self.payload / 'usr/bin' / name
             self.assertEqual(path.stat().st_mode & 0o777, 0o755)
         self.assertTrue((self.payload / 'usr/share/dbus-1/services/io.github.winsnipper.Editor.service').is_file())
         self.assertFalse(list(self.payload.rglob('__pycache__')))
         self.assertFalse((self.payload / 'usr/share/winsnipper/editor/tests').exists())
         desktop = self.payload / 'usr/share/applications/io.github.winsnipper.Editor.desktop'
-        self.assertIn('NoDisplay=true', desktop.read_text())
+        self.assertNotIn('NoDisplay=true', desktop.read_text())
         if shutil.which('desktop-file-validate'):
             subprocess.run(['desktop-file-validate', str(desktop)], check=True)
 
-    def test_editor_dependencies_include_cairo_bindings(self):
+    def test_portable_dependencies_do_not_require_gnome(self):
         depends = subprocess.check_output(['dpkg-deb', '--field', str(self.deb), 'Depends'], text=True)
         self.assertIn('python3-gi-cairo', depends)
+        self.assertIn('xdg-desktop-portal', depends)
+        self.assertNotIn('gnome-shell', depends)
 
     def test_payload_has_root_ownership_and_no_world_writable_files(self):
         contents = subprocess.check_output(['dpkg-deb', '--contents', str(self.deb)], text=True)
