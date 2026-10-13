@@ -41,9 +41,13 @@ def ensure_native_x11():
 def main():
     try:
         ensure_native_x11()
-        import gi
-        gi.require_version("Gdk", "3.0")
-        from gi.repository import Gdk
+        try:
+            import gi
+            gi.require_version("Gdk", "3.0")
+            from gi.repository import Gdk
+        except (ImportError, ValueError) as error:
+            raise RuntimeError("X11 full-screen capture needs GTK3 bindings. Install "
+                               f"gir1.2-gtk-3.0 and python3-gi. {error}") from error
         Gdk.set_allowed_backends("x11")
         Gdk.init([])
         # Older Xwayland predates the identifying extension. Its virtual input
@@ -62,16 +66,23 @@ def main():
         pixels = Gdk.pixbuf_get_from_window(root, 0, 0, width, height)
         if pixels is None:
             raise RuntimeError("The X11 server could not provide the screen image.")
-        resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_BYTES - 1, MAX_BYTES - 1))
+        # Never raise either inherited limit, including a deliberately lowered
+        # soft limit. RLIM_INFINITY is a sentinel, not a finite negative size.
+        soft, hard = resource.getrlimit(resource.RLIMIT_FSIZE)
+        soft, hard = (MAX_BYTES - 1 if value == resource.RLIM_INFINITY
+                      else min(value, MAX_BYTES - 1) for value in (soft, hard))
+        try:
+            resource.setrlimit(resource.RLIMIT_FSIZE, (soft, hard))
+        except (OSError, ValueError) as error:
+            raise RuntimeError(f"Could not apply the X11 capture file-size limit: {error}") from error
         success, png = pixels.save_to_bufferv("png", [], [])
-        if not success or len(png) >= MAX_BYTES:
-            raise RuntimeError("The X11 capture could not be encoded within the 256 MiB limit.")
+        if not success:
+            raise RuntimeError("The X11 capture could not be encoded as PNG.")
+        if len(png) > soft:
+            raise RuntimeError(f"The X11 capture exceeds this process's file-size limit ({soft} bytes).")
         sys.stdout.buffer.write(png)
         sys.stdout.buffer.flush()
         return 0
-    except (ImportError, ValueError) as error:
-        print("X11 full-screen capture needs GTK3 bindings. Install gir1.2-gtk-3.0 and python3-gi. "
-              f"{error}", file=sys.stderr)
     except Exception as error:
         print(str(error), file=sys.stderr)
     return 1
