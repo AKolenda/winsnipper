@@ -3,6 +3,10 @@
 set -euo pipefail
 
 VERSION=${1:?usage: build-deb.sh VERSION [OUT_DIR]}
+if ! dpkg --validate-version "$VERSION" 2>/dev/null; then
+    printf 'Invalid Debian package version: %s\n' "$VERSION" >&2
+    exit 2
+fi
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 OUT_DIR=$(mkdir -p "${2:-$ROOT/dist}" && cd -- "${2:-$ROOT/dist}" && pwd)
 UUID='winsnipper@winsnipper.local'

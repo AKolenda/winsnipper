@@ -74,6 +74,9 @@ export class ShellService {
         this._active = active;
         this._cancellable = cancellable;
         this._startSnip = startSnip;
+        // Bumped by every clipboard write; an older request that finishes
+        // reading later must not overwrite newer content.
+        this._clipboardGeneration = 0;
         this._object = Gio.DBusExportedObject.wrapJSObject(INTERFACE, this);
         try {
             this._object.export(Gio.DBus.session, SHELL_PATH);
@@ -100,16 +103,32 @@ export class ShellService {
     }
 
     async SetClipboardImageAsync([path], invocation) {
+        const generation = ++this._clipboardGeneration;
         try {
             checkActive(this._active);
             const bytes = await readClipboardImage(path, this._cancellable, this._active);
             checkActive(this._active);
-            St.Clipboard.get_default().set_content(St.ClipboardType.CLIPBOARD, 'image/png', bytes);
+            if (generation !== this._clipboardGeneration) {
+                // Only for a newer write. On teardown the editor gets Error and
+                // falls back to its own clipboard, so the copy is not lost.
+                invocation.return_dbus_error(`${SHELL_NAME}.Cancelled`, 'Superseded by a newer clipboard image');
+                return;
+            }
+            this._setClipboard(bytes);
             invocation.return_value(null);
         } catch (error) {
             warn('SetClipboardImage failed', error);
             invocation.return_dbus_error(`${SHELL_NAME}.Error`, error.message);
         }
+    }
+
+    setClipboardBytes(bytes) {
+        this._clipboardGeneration++;
+        this._setClipboard(bytes);
+    }
+
+    _setClipboard(bytes) {
+        St.Clipboard.get_default().set_content(St.ClipboardType.CLIPBOARD, 'image/png', bytes);
     }
 
     destroy() {

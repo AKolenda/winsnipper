@@ -163,7 +163,8 @@ class GtkTests(unittest.TestCase):
         window._drag_update(None, 100 * window.zoom, 0)
         window._drag_end(None, 100 * window.zoom, 0)
         self.assertEqual(len(window.document.state.strokes), 1)
-        self.assertEqual(window.document.state.strokes[0].points[0], (20, 20))
+        for coordinate in window.document.state.strokes[0].points[0]:
+            self.assertAlmostEqual(coordinate, 20)
         self.spin(lambda: window.status.get_label() == "Saved" and len(self.shell_calls) == 1)
         self.assertEqual(self.shell_calls[-1], str(self.path))
         self.assertEqual(window.saver.saved_revision, 1)

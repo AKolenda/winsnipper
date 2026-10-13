@@ -3,8 +3,9 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 UUID='winsnipper@winsnipper.local'
-DATA_DIR="$HOME/.local/share/winsnipper"
-EXTENSION_DIR="$HOME/.local/share/gnome-shell/extensions/$UUID"
+DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+DATA_DIR="$DATA_HOME/winsnipper"
+EXTENSION_DIR="$DATA_HOME/gnome-shell/extensions/$UUID"
 DRY_RUN=false
 for arg in "$@"; do
     case "$arg" in
@@ -41,9 +42,9 @@ python3 "$HELPER" disable-extension
 python3 "$HELPER" --backup "$DATA_DIR/keybinding-backup.json" restore
 rm -rf -- "$EXTENSION_DIR" "$DATA_DIR/editor" "$DATA_DIR/tools"
 rm -f -- "$HOME/.local/bin/winsnipper-editor" \
-    "$HOME/.local/share/applications/io.github.winsnipper.Editor.desktop" \
-    "$HOME/.local/share/dbus-1/services/io.github.winsnipper.Editor.service"
+    "$DATA_HOME/applications/io.github.winsnipper.Editor.desktop" \
+    "$DATA_HOME/dbus-1/services/io.github.winsnipper.Editor.service"
 if command -v update-desktop-database >/dev/null 2>&1; then
-    update-desktop-database "$HOME/.local/share/applications" || true
+    update-desktop-database "$DATA_HOME/applications" || true
 fi
 printf '%s\n' 'WinSnipper uninstalled; original keybindings restored. Saved screenshots are retained.'

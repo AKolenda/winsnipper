@@ -59,7 +59,10 @@ function harness() {
             prewarm(path = '') { events.push(path ? `editor:prewarm:${path}` : 'editor:prewarm'); }
             open(path) { events.push(`editor:open:${path}`); }
         },
-        ShellService: class { destroy() { events.push('dbus:destroy'); } },
+        ShellService: class {
+            setClipboardBytes(bytes) { assert.equal(bytes, 'PNG'); events.push('clipboard:set'); }
+            destroy() { events.push('dbus:destroy'); }
+        },
         SelectionOverlay: Overlay,
         SnipToast: Toast,
         requestCapture() { events.push('capture'); const value = deferred(); captures.push(value); return value.promise; },
@@ -101,7 +104,7 @@ test('completion closes overlay before encoding, shows toast and warms the saved
     extension._startSnip();
     assert.equal(captures.length, 1, 'shortcut remains locked while completion is pending');
     await flush();
-    assert.deepEqual(events.slice(4), ['overlay:close', 'encode', 'save', 'toast:new', 'toast:show', 'editor:prewarm', 'editor:prewarm:/tmp/shot.png']);
+    assert.deepEqual(events.slice(4), ['overlay:close', 'encode', 'clipboard:set', 'save', 'toast:new', 'toast:show', 'editor:prewarm', 'editor:prewarm:/tmp/shot.png']);
     extension._startSnip();
     assert.equal(captures.length, 2);
     extension.disable();

@@ -3,12 +3,13 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 UUID='winsnipper@winsnipper.local'
-DATA_DIR="$HOME/.local/share/winsnipper"
-EXTENSION_DIR="$HOME/.local/share/gnome-shell/extensions/$UUID"
+DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+DATA_DIR="$DATA_HOME/winsnipper"
+EXTENSION_DIR="$DATA_HOME/gnome-shell/extensions/$UUID"
 EDITOR_DIR="$DATA_DIR/editor"
 LAUNCHER="$HOME/.local/bin/winsnipper-editor"
-DESKTOP="$HOME/.local/share/applications/io.github.winsnipper.Editor.desktop"
-SERVICE="$HOME/.local/share/dbus-1/services/io.github.winsnipper.Editor.service"
+DESKTOP="$DATA_HOME/applications/io.github.winsnipper.Editor.desktop"
+SERVICE="$DATA_HOME/dbus-1/services/io.github.winsnipper.Editor.service"
 DRY_RUN=false
 for arg in "$@"; do
     case "$arg" in
@@ -94,6 +95,6 @@ if command -v gnome-extensions >/dev/null 2>&1; then
     gnome-extensions enable "$UUID" || true
 fi
 if command -v update-desktop-database >/dev/null 2>&1; then
-    update-desktop-database "$HOME/.local/share/applications" || true
+    update-desktop-database "$DATA_HOME/applications" || true
 fi
 printf '%s\n' 'WinSnipper installed. On Wayland, log out and back in once, then press Super+Shift+S.'

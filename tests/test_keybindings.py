@@ -113,7 +113,6 @@ class ScanTests(unittest.TestCase):
 
     def test_new_reinstall_conflicts_merge_and_preserve_first_originals(self):
         settings = FakeSettings()
-        original = settings.values.copy()
         with tempfile.TemporaryDirectory() as directory:
             backup = Path(directory) / 'backup.json'
             kb.disable(settings, backup)
@@ -134,7 +133,8 @@ class ScanTests(unittest.TestCase):
             self.assertEqual(merged[-1]['original'], before[new_key])
             self.assertFalse(kb.scan(settings))
             kb.restore(settings, backup)
-            self.assertEqual(settings.values[old_key], original[old_key])
+            # Edited by the user after setup, so restore leaves it alone.
+            self.assertEqual(settings.values[old_key], "['F12']")
             self.assertEqual(settings.values[new_key], before[new_key])
 
     def test_failed_backup_merge_leaves_record_and_settings_intact(self):
@@ -162,6 +162,52 @@ class ScanTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'write failed'):
                     kb.restore(settings, backup)
             self.assertTrue(backup.exists())
+
+    def test_restore_preserves_shortcuts_changed_after_setup(self):
+        settings = FakeSettings()
+        before = settings.values.copy()
+        changed = ('org.gnome.shell.keybindings', 'screenshot')
+        with tempfile.TemporaryDirectory() as directory:
+            backup = Path(directory) / 'backup.json'
+            kb.disable(settings, backup)
+            settings.values[changed] = "['F10']"
+            kb.restore(settings, backup)
+            self.assertEqual(settings.values[changed], "['F10']")
+            self.assertEqual({k: v for k, v in settings.values.items() if k != changed},
+                             {k: v for k, v in before.items() if k != changed})
+            self.assertFalse(backup.exists())
+
+    def test_restore_retains_unavailable_bindings_for_later(self):
+        settings = FakeSettings()
+        with tempfile.TemporaryDirectory() as directory:
+            backup = Path(directory) / 'backup.json'
+            kb.disable(settings, backup)
+            missing = {'schema': 'org.gnome.mutter.keybindings', 'key': 'gone',
+                       'original': "['<Super><Shift>s']", 'replacement': '@as []'}
+            saved = json.loads(backup.read_text())
+            saved['bindings'].append(missing)
+            backup.write_text(json.dumps(saved))
+            kb.restore(settings, backup)
+            self.assertEqual(json.loads(backup.read_text())['bindings'], [missing])
+
+    def test_backup_from_older_release_with_group_write_still_restores(self):
+        settings = FakeSettings()
+        before = settings.values.copy()
+        with tempfile.TemporaryDirectory() as directory:
+            backup = Path(directory) / 'backup.json'
+            kb.disable(settings, backup)
+            backup.chmod(0o664)
+            kb.restore(settings, backup)
+            self.assertEqual(settings.values, before)
+
+    def test_malformed_backup_is_rejected_without_changes(self):
+        settings = FakeSettings()
+        with tempfile.TemporaryDirectory() as directory:
+            backup = Path(directory) / 'backup.json'
+            backup.write_text('[]')
+            with self.assertRaisesRegex(ValueError, 'Unsupported'):
+                kb.restore(settings, backup)
+            self.assertFalse(any(call[0] == 'set' for call in settings.calls))
 
     def test_enable_preserves_other_extensions_and_prevents_duplicates(self):
         settings = FakeSettings()
