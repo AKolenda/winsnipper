@@ -33,5 +33,5 @@ for (( attempt=0; attempt<50; attempt++ )); do
     sleep 0.1
 done
 [[ -S "$runtime_dir/$WAYLAND_DISPLAY" ]]
-dbus-run-session -- /usr/bin/python3 -m unittest discover -s editor/tests
-dbus-run-session -- /usr/bin/python3 editor/tests/smoke_service.py
+dbus-run-session --config-file=.github/test-session-bus.conf -- /usr/bin/python3 -m unittest discover -v -s editor/tests
+dbus-run-session --config-file=.github/test-session-bus.conf -- /usr/bin/python3 editor/tests/smoke_service.py
