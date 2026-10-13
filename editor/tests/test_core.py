@@ -364,12 +364,13 @@ class SaveTests(unittest.TestCase):
         self.loop.drain()
         self.assertIsNot(other._source, coordinator._source)
 
-    def test_path_encode_receives_a_filename_and_fsync_failure_cleans_temp(self):
+    def test_encode_uses_created_descriptor_and_fsync_failure_cleans_temp(self):
         original = self.path.read_bytes()
         with patch("winsnipper.saving.render") as mocked:
             atomic_save(self.path, self.edit())
-            filename = mocked.return_value.write_to_png.call_args.args[0]
-            self.assertIsInstance(filename, str)
+            output = mocked.return_value.write_to_png.call_args.args[0]
+            self.assertTrue(hasattr(output, 'fileno'))
+            self.assertTrue(output.closed)
         self.path.write_bytes(original)
         with patch("winsnipper.saving.os.fsync", side_effect=OSError("sync failed")):
             with self.assertRaises(OSError):

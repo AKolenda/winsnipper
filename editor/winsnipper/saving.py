@@ -18,14 +18,17 @@ def atomic_save(path, snapshot, source=None):
         mode = 0o600
     fd, temporary = tempfile.mkstemp(prefix=".winsnipper-", suffix=".png.tmp", dir=path.parent)
     try:
-        try:
-            os.fchmod(fd, mode)
-        finally:
-            os.close(fd)
-        # A filename lets cairo/libpng encode without Python chunk callbacks.
-        surface.write_to_png(temporary)
-        with open(temporary, "rb") as output:
+        # Keep the exclusively created descriptor through encoding and fsync.
+        # Reopening its name would follow a swapped symlink in a shared folder.
+        with os.fdopen(fd, "wb") as output:
+            os.fchmod(output.fileno(), mode)
+            surface.write_to_png(output)
+            output.flush()
             os.fsync(output.fileno())
+            written = os.fstat(output.fileno())
+            named = os.stat(temporary, follow_symlinks=False)
+            if (written.st_dev, written.st_ino) != (named.st_dev, named.st_ino):
+                raise OSError("The temporary screenshot was replaced during saving.")
         os.replace(temporary, path)
     finally:
         try:
