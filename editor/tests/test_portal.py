@@ -256,6 +256,12 @@ class PortalTests(unittest.TestCase):
         self.assertEqual(self.application.get_accels_for_action("app.new-snip"), ["<Control>n"])
         self.assertEqual(self.application.get_accels_for_action("app.open"), ["<Control>o"])
 
+    def test_desktop_capture_action_starts_a_snip(self):
+        with patch("winsnipper.app.GLib.get_user_special_dir", return_value=str(self.root / "Pictures")):
+            self.application.activate_action("capture", None)
+            self.spin(lambda: bool(self.application.windows_by_path))
+        self.assertEqual(len(self.requests), 1)
+
     def test_delay_cancel_and_duplicate_request(self):
         self.application.start_capture("area", 5)
         self.application.start_capture("window", 0)

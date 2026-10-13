@@ -56,7 +56,8 @@ class EditorApplication(Gtk.Application):
         path_action = Gio.SimpleAction.new("prewarm-path", GLib.VariantType.new("s"))
         path_action.connect("activate", self._prewarm_path)
         self.add_action(path_action)
-        for name, callback in (("new-snip", self.show_capture), ("open", self._choose_open)):
+        for name, callback in (("new-snip", self.show_capture), ("capture", self.start_capture),
+                               ("open", self._choose_open)):
             action = Gio.SimpleAction.new(name, None)
             action.connect("activate", lambda _action, _parameter, call=callback: call())
             self.add_action(action)
