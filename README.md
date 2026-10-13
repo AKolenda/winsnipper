@@ -1,7 +1,9 @@
 # WinSnipper
 
-Windows-style snipping for GNOME Shell 45–49, targeting Zorin OS 18 / GNOME 46.
-Works on Wayland and X11. Requires Python 3, PyGObject and GTK 4.
+Windows-style snipping and annotation for Linux on Wayland and X11. The standalone
+app uses your desktop's screenshot portal; the optional GNOME Shell 45–49 extension
+provides instant frozen-screen selection (primary target: Zorin OS 18 / GNOME 46).
+Requires Python 3, PyGObject and GTK 4.
 
 **Debian package:** download `winsnipper_*_all.deb` from the latest GitHub release,
 run `sudo apt install ./winsnipper_*_all.deb`, then log out and back in. At that
@@ -13,12 +15,41 @@ on every push to master (`VERSION` plus the run number); build one locally with
 `packaging/build-deb.sh 0.1.0`.
 
 **From a checkout:** run `./install.sh`. It installs per user without elevated
-privileges, enables the extension and backs up conflicting Super+Shift+S bindings.
-**On Wayland, log out and back in once.** `./install.sh --dry-run` previews actions
+privileges. On GNOME it enables the extension and backs up conflicting
+Super+Shift+S bindings; on other desktops it installs the portable app. Use
+`--gnome` or `--portable` to choose explicitly.
+**For the GNOME extension on Wayland, log out and back in once.** `./install.sh --dry-run` previews actions
 without changing files or settings; dependency checks run during actual installation.
 The editor entry point must be present in `editor/` before installing.
 
-Press **Super+Shift+S**, choose Rectangle, Window or Fullscreen, then drag or click.
+**Standalone app (GNOME, KDE, and other desktops with a Screenshot portal):**
+run `./install.sh --portable` to install without GNOME Shell or shortcut changes.
+Launch **WinSnipper** from your applications menu or run `winsnipper`. Use **New
+snip**, select a mode and optional 3/5/10-second delay, then annotate the result.
+`Ctrl+N` opens the snip controls and `Ctrl+O` opens an existing PNG. For a custom
+desktop shortcut, bind `winsnipper --capture`; options include
+`winsnipper --capture --mode area --delay 3` (`choose`, `area`, `window`, `screen`;
+CLI delays 0–60 seconds). Configure the shortcut in your desktop's keyboard settings.
+
+Portable capture needs `xdg-desktop-portal` and a Screenshot backend selected for
+your running desktop (for example GNOME, KDE, wlr or Hyprland). Installing only
+`xdg-desktop-portal-gtk` is insufficient. The system picker and permission prompts
+remain in control. Mode requests are sent when the portal advertises Screenshot
+v3 and the target; older backends choose modes in their own dialog and may offer
+only whole-screen capture. There is no universal Wayland window enumeration,
+identical overlay, or guarantee that hover menus survive the portal interaction.
+If the service is absent, denied, cancelled or times out, the app restores its
+controls and explains what happened. Portable captures open immediately for
+editing and copying; they do not use the GNOME extension toast.
+
+Portal images are copied into private `Pictures/WinSnipper` files before editing
+(XDG Pictures location, falling back to `~/Pictures`). Autosave never overwrites
+the portal's source file. Existing `WinSnipper` output folders must have private
+permissions (0700). Screenshot files use 0600 permissions. Clipboard persistence
+after app exit depends on the desktop's clipboard manager when the GNOME extension
+is unavailable.
+
+**GNOME extension:** press **Super+Shift+S**, choose Rectangle, Window or Fullscreen, then drag or click.
 Escape/right-click cancels. A snip is copied and saved to Pictures/Screenshots;
 click its bottom-right toast to annotate. Hover pauses dismissal. Extension
 preferences control destination, default mode and timeout (0 keeps the toast).

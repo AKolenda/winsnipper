@@ -12,7 +12,8 @@ usage() {
     printf '%s\n' 'Usage: winsnipper-setup [--remove | --first-run]' \
         '  (no option)  take over Super+Shift+S and enable the GNOME extension' \
         '  --remove     restore unchanged original bindings and disable the extension' \
-        '  --first-run  configure GNOME once; later user choices are retained'
+        '  --first-run  configure GNOME once; later user choices are retained' \
+        'Other desktops: bind your preferred shortcut to winsnipper --capture.'
 }
 [[ $# -le 1 ]] || { usage >&2; exit 2; }
 case "${1:-}" in

@@ -55,6 +55,7 @@ jobs:
           deb=$(packaging/build-deb.sh "$version" "$RUNNER_TEMP/dist")
           sudo apt-get install --yes --no-install-recommends "$deb"
           desktop-file-validate /usr/share/applications/io.github.winsnipper.Editor.desktop
+          /usr/bin/winsnipper --help
           /usr/bin/winsnipper-editor --help
           sudo apt-get remove --yes winsnipper
   release:
@@ -79,4 +80,4 @@ jobs:
           gh release create "v$version" "$deb" \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "WinSnipper $version" \
-            --notes 'Install the .deb with apt. GNOME configures Super+Shift+S on next login. Run winsnipper-setup --remove to restore unchanged GNOME bindings.'
+            --notes 'Install the .deb with apt. GNOME configures Super+Shift+S on next login; other desktops can bind winsnipper --capture and use their screenshot portal. Run winsnipper-setup --remove to restore unchanged GNOME bindings.'

@@ -153,6 +153,16 @@ class EditorWindow(Gtk.ApplicationWindow):
         self.area = Canvas(self)
         self.area.set_cursor_from_name("crosshair")
         self.scroller.set_child(self.area)
+        capture_bar = Gtk.Box(spacing=8)
+        capture_bar.set_margin_start(12)
+        capture_bar.set_margin_end(12)
+        capture_bar.set_margin_top(6)
+        capture_bar.set_margin_bottom(6)
+        capture_bar.append(Gtk.Button(label="New snip", action_name="app.new-snip",
+                                      tooltip_text="New snip (Ctrl+N)"))
+        capture_bar.append(Gtk.Button(label="Open image…", action_name="app.open",
+                                      tooltip_text="Open image (Ctrl+O)"))
+        content.append(capture_bar)
         content.append(self.scroller)
         footer = Gtk.Box(spacing=12)
         footer.set_margin_start(12)
@@ -189,10 +199,10 @@ class EditorWindow(Gtk.ApplicationWindow):
             geometry = monitor.get_geometry()
             width, height = geometry.width, geometry.height
         default_width = min(int(width * 0.85), max(760, self.base.width + 32))
-        default_height = min(int(height * 0.85), max(420, self.base.height + 110))
+        default_height = min(int(height * 0.85), max(420, self.base.height + 154))
         self.set_default_size(default_width, default_height)
         # Account for the header/footer before the first allocation/present.
-        self._viewport_size = (default_width, max(1, default_height - 110))
+        self._viewport_size = (default_width, max(1, default_height - 154))
         self._fit_to_size()
 
     def _viewport_changed(self, *_args):

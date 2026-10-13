@@ -46,6 +46,7 @@ def user_paths():
         'editor': data / 'winsnipper/editor',
         'tools': data / 'winsnipper/tools',
         'launcher': home / '.local/bin/winsnipper-editor',
+        'capture_launcher': home / '.local/bin/winsnipper',
         'desktop': data / 'applications' / (APP_ID + '.desktop'),
         'service': data / 'dbus-1/services' / (APP_ID + '.service'),
     }
@@ -62,9 +63,12 @@ def desktop_quote(path):
 
 
 def desktop_entry(launcher):
-    return ('[Desktop Entry]\nType=Application\nName=WinSnipper Editor\n'
-            'Exec=' + desktop_quote(launcher) + ' %U\nIcon=accessories-screenshot\n'
-            'DBusActivatable=true\nNoDisplay=true\nTerminal=false\nMimeType=image/png;\n')
+    command = desktop_quote(launcher)
+    return ('[Desktop Entry]\nType=Application\nName=WinSnipper\n'
+            'Comment=Capture and annotate screenshots\nExec=' + command + ' %U\n'
+            'Icon=accessories-screenshot\nDBusActivatable=true\nTerminal=false\n'
+            'Categories=Graphics;GTK;\nMimeType=image/png;\nActions=capture;\n\n'
+            '[Desktop Action capture]\nName=New Snip\nExec=' + command + ' --capture\n')
 
 
 def write_file(path, text, mode=0o644):
@@ -125,13 +129,14 @@ def install(root, portable):
             replace_tree(stage / name, paths[name])
     command = '#!/bin/sh\nexec ' + shlex.quote(sys.executable) + ' ' + shlex.quote(str(paths['editor'] / 'winsnipper_editor.py')) + ' "$@"\n'
     write_file(paths['launcher'], command, 0o755)
-    write_file(paths['desktop'], desktop_entry(paths['launcher']))
+    write_file(paths['capture_launcher'], command, 0o755)
+    write_file(paths['desktop'], desktop_entry(paths['capture_launcher']))
     write_file(paths['service'], '[D-BUS Service]\nName=' + APP_ID + '\nExec=' + exec_quote(paths['launcher']) + ' --gapplication-service\n')
 
 
 def uninstall():
     paths = user_paths()
-    for key in ('extension', 'editor', 'tools', 'launcher', 'desktop', 'service'):
+    for key in ('extension', 'editor', 'tools', 'launcher', 'capture_launcher', 'desktop', 'service'):
         remove_path(paths[key])
 
 

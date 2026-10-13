@@ -41,13 +41,14 @@ cat > "$PKG/usr/bin/winsnipper-editor" <<'SH'
 exec /usr/bin/python3 /usr/share/winsnipper/editor/winsnipper_editor.py "$@"
 SH
 chmod 755 "$PKG/usr/bin/winsnipper-editor"
+install -m 755 "$PKG/usr/bin/winsnipper-editor" "$PKG/usr/bin/winsnipper"
 
 python3 - "$ROOT" "$PKG/usr/share/applications/io.github.winsnipper.Editor.desktop" <<'PYTHON'
 from pathlib import Path
 import sys
 sys.path.insert(0, sys.argv[1])
 from tools.install import desktop_entry
-Path(sys.argv[2]).write_text(desktop_entry('/usr/bin/winsnipper-editor'))
+Path(sys.argv[2]).write_text(desktop_entry('/usr/bin/winsnipper'))
 PYTHON
 
 cat > "$PKG/usr/share/dbus-1/services/io.github.winsnipper.Editor.service" <<'INI'
@@ -76,15 +77,17 @@ Version: $VERSION
 Architecture: all
 Maintainer: AKolenda <AKolenda@users.noreply.github.com>
 Installed-Size: $(du -sk --exclude=DEBIAN "$PKG" | cut -f1)
-Depends: gnome-shell (>= 45), python3, python3-gi, python3-gi-cairo, python3-cairo, gir1.2-gtk-4.0, libglib2.0-bin
+Depends: python3, python3-gi, python3-gi-cairo, python3-cairo, gir1.2-gtk-4.0, libglib2.0-bin, xdg-desktop-portal
+Suggests: gnome-shell (>= 45)
 Section: graphics
 Priority: optional
 Homepage: https://github.com/AKolenda/winsnipper
-Description: Windows-style Super+Shift+S snipping for GNOME Shell
+Description: Screenshot capture and annotation for Linux desktops
  Freezes the screen before the selection UI appears, so hover states are kept,
  copies the snip, saves it to Pictures/Screenshots and opens an annotation
- editor from the toast. Each user's shortcut is configured at GNOME login;
- winsnipper-setup --remove restores unchanged original bindings.
+ editor from the toast on GNOME. Other desktops use the screenshot portal
+ supplied by their desktop environment. On GNOME, each user's shortcut is
+ configured at login; winsnipper-setup --remove restores unchanged bindings.
 CONTROL
 
 DEB="$OUT_DIR/winsnipper_${VERSION}_all.deb"
