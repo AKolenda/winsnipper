@@ -35,7 +35,7 @@ memory.write_bytes(bytes, null);
 memory.close(null);
 assert(memory.steal_as_bytes().get_size() === 8, 'memory stream byte transfer');
 assert(new GLib.Variant('(sava{sv})', ['prewarm', [], {}]).get_type_string() === '(sava{sv})', 'prewarm variant');
-assert(new GLib.Variant('(assa{sv})', [['file:///tmp/a.png'], '', {}]).get_type_string() === '(assa{sv})', 'Open variant');
+assert(new GLib.Variant('(asa{sv})', [['file:///tmp/a.png'], {}]).get_type_string() === '(asa{sv})', 'standard Open variant');
 await asyncCall(file, 'delete_async', 'delete_finish', [0, null]);
 for (const dir of [directory, directory.get_parent(), Gio.File.new_for_path(path)])
     await asyncCall(dir, 'delete_async', 'delete_finish', [0, null]);
