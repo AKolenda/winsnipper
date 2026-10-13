@@ -151,6 +151,10 @@ class EditorApplication(Gtk.Application):
         if self._option_error(options) is not None:
             return 2
         if capture:
+            if mode != "x11-screen" and self.get_dbus_connection() is None:
+                print("Screenshot capture requires a desktop session D-Bus connection.", file=sys.stderr)
+                self.quit()
+                return 1
             self.start_capture(mode, delay)
         elif files:
             self.do_open([command_line.create_file_for_arg(path) for path in files], len(files), "")

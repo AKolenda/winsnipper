@@ -256,6 +256,49 @@ class PortalTests(unittest.TestCase):
         self.assertEqual(self.application.get_accels_for_action("app.new-snip"), ["<Control>n"])
         self.assertEqual(self.application.get_accels_for_action("app.open"), ["<Control>o"])
 
+    def test_missing_session_bus_restores_ui_and_cli_exits(self):
+        editor = str(Path(__file__).resolve().parents[1])
+        script = f"""
+import sys
+sys.path.insert(0, {editor!r})
+from winsnipper.app import EditorApplication
+from winsnipper.gtk_support import GLib
+app = EditorApplication('io.github.winsnipper.NoBusTests')
+app.register(None)
+assert app.get_dbus_connection() is None
+app.set_inactivity_timeout(0)
+app.start_capture()
+restored = []
+timed_out = []
+def check():
+    if app._capture_busy:
+        return True
+    assert app.capture_window.get_visible()
+    assert 'D-Bus' in app.capture_window.status.get_label()
+    assert app.capture_request is None
+    assert app._capture_timer is None
+    restored.append(True)
+    app.capture_window.destroy()
+    return False
+GLib.timeout_add(20, check)
+def deadline():
+    timed_out.append(True)
+    app.quit()
+    return False
+GLib.timeout_add(2000, deadline)
+app.run(['winsnipper'])
+assert restored and not timed_out
+"""
+        environment = dict(os.environ, DBUS_SESSION_BUS_ADDRESS="unix:path=" + str(self.root / "missing-bus"))
+        result = subprocess.run([sys.executable, "-c", script], env=environment,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=8)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = subprocess.run([sys.executable, str(Path(editor) / "winsnipper_editor.py"), "--capture"],
+                                env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, timeout=8)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("session D-Bus", result.stderr)
+
     def test_desktop_capture_action_starts_a_snip(self):
         with patch("winsnipper.app.GLib.get_user_special_dir", return_value=str(self.root / "Pictures")):
             self.application.activate_action("capture", None)

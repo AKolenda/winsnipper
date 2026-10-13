@@ -38,6 +38,10 @@ class PortalCapture:
         if mode not in MODES:
             raise ValueError("Unknown capture mode.")
         self.mode = mode
+        if self.connection is None:
+            self._finish(error="A desktop session D-Bus connection is required for screenshot capture. "
+                               "Log into your desktop session and launch WinSnipper there.")
+            return
         self._timeout = GLib.timeout_add_seconds(self.timeout_seconds, self._timed_out)
         self.connection.call(PORTAL_NAME, PORTAL_PATH, "org.freedesktop.DBus.Properties", "GetAll",
                              GLib.Variant("(s)", (SCREENSHOT_IFACE,)), GLib.VariantType.new("(a{sv})"),
