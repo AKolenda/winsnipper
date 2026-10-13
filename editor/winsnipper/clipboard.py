@@ -1,5 +1,5 @@
 """Prefer the Shell clipboard owner so copied PNGs outlive this process."""
-from .gtk_support import Gdk, Gio, GLib, GObject
+from .gtk_support import Gdk, Gio, GLib, GObject, dispatch
 
 BUS_NAME = "io.github.winsnipper.Shell"
 OBJECT_PATH = "/io/github/winsnipper/Shell"
@@ -9,6 +9,12 @@ INTERFACE = "io.github.winsnipper.Shell"
 def set_image(application, path, callback=lambda error: None):
     application.hold()
     path = str(path)
+    # A slow older copy must not replace a newer one on the clipboard.
+    generation = getattr(application, "_clipboard_generation", 0) + 1
+    application._clipboard_generation = generation
+
+    def superseded():
+        return application._clipboard_generation != generation
 
     def finish(error=None):
         try:
@@ -18,11 +24,23 @@ def set_image(application, path, callback=lambda error: None):
 
     def fallback():
         try:
+            # Texture loading is thread-safe; keep PNG decoding off the GTK loop.
+            future = application.executor.submit(Gdk.Texture.new_from_filename, path)
+        except RuntimeError as error:
+            finish(error)
+        else:
+            future.add_done_callback(lambda done: dispatch(lambda: loaded(done)))
+
+    def loaded(future):
+        if superseded():
+            finish()
+            return
+        try:
+            texture = future.result()
             display = Gdk.Display.get_default()
             if display is None:
                 raise RuntimeError("No display is available for the clipboard")
             clipboard = display.get_clipboard()
-            texture = Gdk.Texture.new_from_filename(path)
             if hasattr(clipboard, "set_texture"):
                 clipboard.set_texture(texture)
             else:
@@ -42,8 +60,11 @@ def set_image(application, path, callback=lambda error: None):
     def called(connection, result):
         try:
             connection.call_finish(result)
-        except GLib.Error:
-            fallback()
+        except GLib.Error as error:
+            if Gio.DBusError.get_remote_error(error) == f"{INTERFACE}.Cancelled":
+                finish()  # A newer image already owns the clipboard.
+            else:
+                fallback()
         else:
             finish()
 

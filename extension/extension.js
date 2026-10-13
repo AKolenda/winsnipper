@@ -137,6 +137,9 @@ export default class WinSnipper extends Extension {
         const {bytes, pixbuf} = await encodeCapture(content, scale, rect, active);
         if (!active())
             return;
+        // Also supersedes editor copies still being read, so they cannot
+        // replace this newer snip on the clipboard when they finish.
+        this._service.setClipboardBytes(bytes);
         const saving = saveCapture(bytes, saveDirectory(this._settings), this._cancellable, active)
             .catch(error => {
                 if (active())

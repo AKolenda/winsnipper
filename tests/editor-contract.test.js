@@ -107,3 +107,44 @@ test('unchanged rounded selection label skips layout but still repositions', () 
     assert.equal(texts, 2);
     assert.equal(measures, 4);
 });
+
+test('a slow editor copy never replaces a newer clipboard image', async () => {
+    const reads = new Map();
+    const clipboard = [];
+    const ShellService = vm.runInNewContext(`${source('../extension/lib/dbus.js')}
+        readClipboardImage = path => new Promise(resolve => reads.set(path, resolve));
+        ShellService`, {
+        reads,
+        Gio: {
+            DBusExportedObject: {wrapJSObject: () => ({export() {}, unexport() {}})},
+            DBus: {session: {}}, BusNameOwnerFlags: {NONE: 0}, bus_own_name_on_connection: () => 1,
+            bus_unown_name() {},
+        },
+        St: {Clipboard: {get_default: () => ({set_content: (_type, _mime, bytes) => clipboard.push(bytes)})},
+            ClipboardType: {CLIPBOARD: 0}},
+        checkActive() {}, warn() {},
+    });
+    const service = new ShellService(() => {}, null, () => true);
+    const replies = [];
+    const invocation = name => ({
+        return_value: () => replies.push(`${name}:ok`),
+        return_dbus_error: error => replies.push(`${name}:${error.split('.').at(-1)}`),
+    });
+    const flush = () => new Promise(resolve => setImmediate(resolve));
+
+    service.SetClipboardImageAsync(['/tmp/old.png'], invocation('old'));
+    service.SetClipboardImageAsync(['/tmp/new.png'], invocation('new'));
+    reads.get('/tmp/new.png')('NEW');
+    await flush();
+    reads.get('/tmp/old.png')('OLD');
+    await flush();
+    assert.deepEqual(clipboard, ['NEW']);
+    assert.deepEqual(replies, ['new:ok', 'old:Cancelled']);
+
+    service.SetClipboardImageAsync(['/tmp/edit.png'], invocation('edit'));
+    service.setClipboardBytes('SNIP');
+    reads.get('/tmp/edit.png')('EDIT');
+    await flush();
+    assert.deepEqual(clipboard, ['NEW', 'SNIP'], 'a fresh snip wins over a pending editor copy');
+    assert.equal(replies.at(-1), 'edit:Cancelled');
+});

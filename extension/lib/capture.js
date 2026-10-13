@@ -1,7 +1,6 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
-import St from 'gi://St';
 
 import {logicalToTexture, uniqueFilename} from './geometry.js';
 import {asyncCall, checkActive, closeStream, makeDirectories} from './io.js';
@@ -39,7 +38,6 @@ export async function encodeCapture(content, scale, rect, active) {
         stream.close(null);
         checkActive(active);
         const bytes = stream.steal_as_bytes();
-        St.Clipboard.get_default().set_content(St.ClipboardType.CLIPBOARD, 'image/png', bytes);
         return {bytes, pixbuf};
     } finally {
         if (!stream.is_closed())
@@ -76,7 +74,7 @@ export async function saveCapture(bytes, directory, cancellable, active) {
             // Exclusive creation handles races with other snips/processes without
             // any synchronous exists() check or overwriting an existing screenshot.
             stream = await asyncCall(file, 'create_async', 'create_finish',
-                [Gio.FileCreateFlags.NONE, GLib.PRIORITY_DEFAULT, cancellable]);
+                [Gio.FileCreateFlags.PRIVATE, GLib.PRIORITY_DEFAULT, cancellable]);
         } catch (error) {
             if (!error.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.EXISTS))
                 throw error;

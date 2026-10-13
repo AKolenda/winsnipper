@@ -20,7 +20,7 @@ SCHEMAS = (
 MEDIA_SCHEMA = SCHEMAS[-1]
 CUSTOM_SCHEMA = MEDIA_SCHEMA + '.custom-keybinding'
 EXTENSION_UUID = 'winsnipper@winsnipper.local'
-DEFAULT_BACKUP = Path.home() / '.local/share/winsnipper/keybinding-backup.json'
+DEFAULT_BACKUP = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share') / 'winsnipper/keybinding-backup.json'
 
 
 def normalize_accelerator(value):
@@ -105,36 +105,47 @@ def scan(settings):
     return conflicts
 
 
+def read_backup(backup):
+    if not backup.exists():
+        return None
+    saved = json.loads(backup.read_text())
+    if not isinstance(saved, dict) or saved.get('version') != 1 or not isinstance(saved.get('bindings'), list):
+        raise ValueError(f'Unsupported keybinding backup format: {backup}')
+    return saved
+
+
+def write_backup(backup, saved):
+    # Replace atomically, so a failed write never loses the previous restore record.
+    backup.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix='.keybinding-backup-', dir=backup.parent)
+    try:
+        with os.fdopen(fd, 'w') as stream:
+            json.dump(saved, stream, indent=2)
+            stream.write('\n')
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, backup)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
 def disable(settings, backup, dry_run=False):
     conflicts = scan(settings)
-    if backup.exists():
-        saved = json.loads(backup.read_text())
+    saved = read_backup(backup)
+    if saved is not None:
         known = {(item['schema'], item['key']) for item in saved['bindings']}
         new = [item for item in conflicts if (item['schema'], item['key']) not in known]
         if new:
             print(f'{"Would merge" if dry_run else "Merging"} {len(new)} new conflicts into: {backup}')
             if not dry_run:
                 saved['bindings'].extend(new)
-                # Preserve the previous restore record even if writing fails.
-                fd, temporary = tempfile.mkstemp(prefix='.keybinding-backup-', dir=backup.parent)
-                try:
-                    with os.fdopen(fd, 'w') as stream:
-                        json.dump(saved, stream, indent=2)
-                        stream.write('\n')
-                        stream.flush()
-                        os.fsync(stream.fileno())
-                    os.replace(temporary, backup)
-                finally:
-                    if os.path.exists(temporary):
-                        os.unlink(temporary)
+                write_backup(backup, saved)
         print(f'Preserving existing backup: {backup}')
     else:
         print(f'{"Would save" if dry_run else "Saving"} keybinding backup: {backup}')
         if not dry_run:
-            backup.parent.mkdir(parents=True, exist_ok=True)
-            with backup.open('x') as stream:
-                json.dump({'version': 1, 'bindings': conflicts}, stream, indent=2)
-                stream.write('\n')
+            write_backup(backup, {'version': 1, 'bindings': conflicts})
     for item in conflicts:
         print(f"Remove Super+Shift+S: {item['schema']} {item['key']}")
         if not dry_run:
@@ -144,23 +155,39 @@ def disable(settings, backup, dry_run=False):
 
 
 def restore(settings, backup, dry_run=False):
-    if not backup.exists():
+    saved = read_backup(backup)
+    if saved is None:
         print('No keybinding backup to restore.')
         return
-    saved = json.loads(backup.read_text())
     available = set(settings.run('list-schemas').splitlines())
     relocatable = set(settings.run('list-relocatable-schemas').splitlines())
+    pending = []
     for item in saved['bindings']:
-        schema = item['schema']
-        if schema.split(':', 1)[0] not in available | relocatable:
-            print(f'Skipping unavailable schema: {schema}')
+        schema, key = item['schema'], item['key']
+        # Keep records whose schema/key is missing now (e.g. a disabled
+        # component), so a later restore can still put them back.
+        if (schema.split(':', 1)[0] not in available | relocatable
+                or key not in settings.run('list-keys', schema).splitlines()):
+            print(f'Retaining unavailable binding for later restore: {schema} {key}')
+            pending.append(item)
             continue
-        print(f"Restore: {schema} {item['key']}")
+        current = parse_variant(settings.run('get', schema, key))
+        if current == parse_variant(item['original']):
+            continue  # Already restored, e.g. by an earlier partial run.
+        if current != parse_variant(item['replacement']):
+            print(f'Preserving shortcut changed after setup: {schema} {key}')
+            continue
+        print(f'Restore: {schema} {key}')
         if not dry_run:
-            settings.run('set', schema, item['key'], item['original'])
-    print(f'{"Would delete" if dry_run else "Deleting"} backup: {backup}')
-    if not dry_run:
-        backup.unlink()
+            settings.run('set', schema, key, item['original'])
+    if pending:
+        print(f'Retaining {len(pending)} unavailable bindings in: {backup}')
+        if not dry_run:
+            write_backup(backup, {'version': 1, 'bindings': pending})
+    else:
+        print(f'{"Would delete" if dry_run else "Deleting"} backup: {backup}')
+        if not dry_run:
+            backup.unlink()
 
 
 def set_extension_enabled(settings, enabled, dry_run=False):

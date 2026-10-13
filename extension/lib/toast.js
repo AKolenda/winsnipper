@@ -7,6 +7,7 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {toastPosition} from './geometry.js';
 import {report} from './log.js';
+import {thumbnailPixbuf} from './thumbnail.js';
 
 export const SnipToast = GObject.registerClass(
 class SnipToast extends St.BoxLayout {
@@ -17,6 +18,7 @@ class SnipToast extends St.BoxLayout {
         this._timer = 0;
         this._closed = false;
         this._onOpen = onOpen;
+        pixbuf = thumbnailPixbuf(pixbuf, St.ThemeContext.get_for_stage(global.stage).scale_factor);
         // Same preview content API as Shell 45–49's ui/screenshot.js.
         const content = St.ImageContent.new_with_preferred_size(pixbuf.width, pixbuf.height);
         content.set_bytes(pixbuf.read_pixel_bytes(),
