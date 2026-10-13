@@ -74,6 +74,9 @@ export class ShellService {
         this._active = active;
         this._cancellable = cancellable;
         this._startSnip = startSnip;
+        this._clipboardRead = null;
+        this._clipboardPending = null;
+        this._destroyed = false;
         this._object = Gio.DBusExportedObject.wrapJSObject(INTERFACE, this);
         try {
             this._object.export(Gio.DBus.session, SHELL_PATH);
@@ -99,20 +102,64 @@ export class ShellService {
         }
     }
 
-    async SetClipboardImageAsync([path], invocation) {
+    SetClipboardImageAsync([path], invocation) {
         try {
-            checkActive(this._active);
-            const bytes = await readClipboardImage(path, this._cancellable, this._active);
-            checkActive(this._active);
-            St.Clipboard.get_default().set_content(St.ClipboardType.CLIPBOARD, 'image/png', bytes);
-            invocation.return_value(null);
+            checkActive(() => !this._destroyed && this._active());
+            const request = {path, invocation, cancellable: new Gio.Cancellable()};
+            // A request can retain almost 256 MiB. Keep only one read and one
+            // newest pending path, and stop an obsolete read before starting it.
+            if (this._clipboardRead) {
+                this._clipboardRead.cancellable.cancel();
+                this._cancelPendingClipboard();
+                this._clipboardPending = request;
+            } else {
+                this._readClipboard(request);
+            }
         } catch (error) {
-            warn('SetClipboardImage failed', error);
             invocation.return_dbus_error(`${SHELL_NAME}.Error`, error.message);
         }
     }
 
+    _cancelPendingClipboard() {
+        this._clipboardPending?.invocation.return_dbus_error(
+            `${SHELL_NAME}.Cancelled`, 'Clipboard request was superseded or cancelled');
+        this._clipboardPending = null;
+    }
+
+    setClipboardBytes(bytes) {
+        checkActive(() => !this._destroyed && this._active());
+        this._clipboardRead?.cancellable.cancel();
+        this._cancelPendingClipboard();
+        St.Clipboard.get_default().set_content(St.ClipboardType.CLIPBOARD, 'image/png', bytes);
+    }
+
+    async _readClipboard(request) {
+        this._clipboardRead = request;
+        const active = () => !this._destroyed && this._active() && !request.cancellable.is_cancelled();
+        try {
+            const bytes = await readClipboardImage(request.path, request.cancellable, active);
+            checkActive(active);
+            St.Clipboard.get_default().set_content(St.ClipboardType.CLIPBOARD, 'image/png', bytes);
+            request.invocation.return_value(null);
+        } catch (error) {
+            const cancelled = !active();
+            if (!cancelled)
+                warn('SetClipboardImage failed', error);
+            request.invocation.return_dbus_error(
+                `${SHELL_NAME}.${cancelled ? 'Cancelled' : 'Error'}`, error.message);
+        } finally {
+            this._clipboardRead = null;
+            const pending = this._clipboardPending;
+            this._clipboardPending = null;
+            if (pending)
+                this._readClipboard(pending);
+        }
+    }
+
     destroy() {
+        this._destroyed = true;
+        this._clipboardRead?.cancellable.cancel();
+        this._cancelPendingClipboard();
         if (this._owner) {
             Gio.bus_unown_name(this._owner);
             this._owner = 0;
@@ -141,6 +188,29 @@ export class EditorClient {
             [[Gio.File.new_for_path(path).get_uri()], {}]), [path]);
     }
 
+    async _launch(fallbackArgs) {
+        const userLauncher = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'bin', 'winsnipper-editor']);
+        let launcher = 'winsnipper-editor';
+        let flags = GLib.SpawnFlags.SEARCH_PATH;
+        try {
+            const info = await asyncCall(Gio.File.new_for_path(userLauncher),
+                'query_info_async', 'query_info_finish',
+                ['standard::type,access::can-execute', Gio.FileQueryInfoFlags.NONE,
+                    GLib.PRIORITY_DEFAULT, this._cancellable]);
+            if (info.get_file_type() === Gio.FileType.REGULAR && info.get_attribute_boolean('access::can-execute')) {
+                launcher = userLauncher;
+                flags = GLib.SpawnFlags.DEFAULT;
+            }
+        } catch (error) {
+            if (error?.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                return;
+            // A missing/unavailable per-user install may still have a system
+            // launcher. Let the child search PATH instead of probing it here.
+        }
+        if (this._active())
+            GLib.spawn_async(null, [launcher, ...fallbackArgs], null, flags, null);
+    }
+
     _call(method, parameters, fallbackArgs) {
         if (!this._active())
             return;
@@ -157,16 +227,9 @@ export class EditorClient {
                 return;
             }
             warn(`Editor ${method} failed; trying launcher`, error);
-            try {
-                // install.sh puts the launcher in ~/.local/bin; the .deb puts it in /usr/bin.
-                const userLauncher = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'bin', 'winsnipper-editor']);
-                const launcher = GLib.file_test(userLauncher, GLib.FileTest.IS_EXECUTABLE)
-                    ? userLauncher : GLib.find_program_in_path('winsnipper-editor') ?? userLauncher;
-                GLib.spawn_async(null, [launcher, ...fallbackArgs], null,
-                    GLib.SpawnFlags.DEFAULT, null);
-            } catch (spawnError) {
+            this._launch(fallbackArgs).catch(spawnError => {
                 warn('Could not launch editor', spawnError);
-            }
+            });
         };
         try {
             Gio.DBus.session.call(EDITOR_NAME, EDITOR_PATH, 'org.freedesktop.Application',

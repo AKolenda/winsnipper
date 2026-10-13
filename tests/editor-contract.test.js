@@ -29,7 +29,7 @@ test('editor uses standard Open and keeps parameterless plus path prewarm', () =
     assert.equal(calls[2][1].values[1][0].values, '/tmp/shot.png');
 });
 
-test('editor launcher fallback is skipped when D-Bus only timed out', () => {
+test('editor launcher fallback probes asynchronously and skips D-Bus timeouts', async () => {
     const spawned = [];
     let executable = ['/home/u/.local/bin/winsnipper-editor', '/usr/bin/winsnipper-editor'];
     const IOErrorEnum = {TIMED_OUT: 24, CANCELLED: 19};
@@ -38,13 +38,17 @@ test('editor launcher fallback is skipped when D-Bus only timed out', () => {
         Gio: {
             IOErrorEnum, DBusError: {TIMEOUT: 1, TIMED_OUT: 2, NO_REPLY: 3}, DBusCallFlags: {NONE: 0},
             DBus: {session: {call(...args) { args.at(-1)({call_finish() { throw failure; }}, null); }}},
+            File: {new_for_path: path => ({path})}, FileQueryInfoFlags: {NONE: 0}, FileType: {REGULAR: 1},
         },
         GLib: {
             build_filenamev: parts => parts.join('/'), get_home_dir: () => '/home/u',
-            file_test: path => executable.includes(path), FileTest: {IS_EXECUTABLE: 64},
-            find_program_in_path: name => (executable.includes(`/usr/bin/${name}`) ? `/usr/bin/${name}` : null),
-            spawn_async: (_dir, argv) => spawned.push(argv), SpawnFlags: {DEFAULT: 0},
+            file_test: () => assert.fail('Synchronous filesystem probe'), FileTest: {IS_EXECUTABLE: 64},
+            find_program_in_path: () => assert.fail('Synchronous PATH search'),
+            spawn_async: (_dir, argv) => spawned.push(argv), SpawnFlags: {DEFAULT: 0, SEARCH_PATH: 4},
+            PRIORITY_DEFAULT: 0,
         },
+        asyncCall: async file => ({get_file_type: () => 1,
+            get_attribute_boolean: () => executable.includes(file.path)}),
         warn() {},
     });
     const client = new EditorClient(null, () => true);
@@ -53,10 +57,12 @@ test('editor launcher fallback is skipped when D-Bus only timed out', () => {
     assert.deepEqual(spawned, [], 'a slow activation may still open the editor');
     failure = {matches: () => false};
     client._call('Open', null, ['/tmp/shot.png']);
+    await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(spawned.map(argv => [...argv]), [['/home/u/.local/bin/winsnipper-editor', '/tmp/shot.png']]);
     executable = ['/usr/bin/winsnipper-editor'];
     client._call('Open', null, ['/tmp/shot.png']);
-    assert.deepEqual([...spawned[1]], ['/usr/bin/winsnipper-editor', '/tmp/shot.png'], 'the .deb launcher is found on PATH');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual([...spawned[1]], ['winsnipper-editor', '/tmp/shot.png'], 'spawn searches PATH for the system launcher');
 });
 
 function overlayHarness() {
