@@ -78,7 +78,7 @@ Architecture: all
 Maintainer: AKolenda <AKolenda@users.noreply.github.com>
 Installed-Size: $(du -sk --exclude=DEBIAN "$PKG" | cut -f1)
 Depends: python3, python3-gi, python3-gi-cairo, python3-cairo, gir1.2-gtk-4.0, libglib2.0-bin, xdg-desktop-portal
-Suggests: gnome-shell (>= 45)
+Suggests: gnome-shell (>= 45), gir1.2-gtk-3.0
 Section: graphics
 Priority: optional
 Homepage: https://github.com/AKolenda/winsnipper

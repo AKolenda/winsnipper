@@ -65,7 +65,8 @@ if [[ "$MODE" == gnome ]]; then
 else
     python3 "$SCRIPT_DIR/tools/install.py" install --root "$SCRIPT_DIR" --portable
     printf '%s\n' 'WinSnipper installed. Launch WinSnipper or bind your shortcut to: winsnipper --capture' \
-        'Screen capture requires xdg-desktop-portal and the screenshot backend for your desktop.'
+        'Screen capture requires xdg-desktop-portal and the screenshot backend for your desktop.' \
+        'Optional native X11 full-screen capture also needs gir1.2-gtk-3.0.'
 fi
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$DATA_HOME/applications" || true
