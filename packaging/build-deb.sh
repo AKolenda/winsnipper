@@ -3,9 +3,17 @@
 set -euo pipefail
 
 VERSION=${1:?usage: build-deb.sh VERSION [OUT_DIR]}
+if [[ $# -gt 2 || ${#VERSION} -gt 128 || ! "$VERSION" =~ ^[0-9][A-Za-z0-9.+:~\-]*$ ]] || ! dpkg --validate-version "$VERSION"; then
+    printf 'Invalid Debian package version: %s\n' "$VERSION" >&2
+    exit 2
+fi
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 OUT_DIR=$(mkdir -p "${2:-$ROOT/dist}" && cd -- "${2:-$ROOT/dist}" && pwd)
 UUID='winsnipper@winsnipper.local'
+if [[ -n $(find "$ROOT/extension" "$ROOT/editor" "$ROOT/tools" -type l -print -quit) ]]; then
+    printf 'Package payload must not contain symbolic links.\n' >&2
+    exit 1
+fi
 STAGE=$(mktemp -d)
 trap 'rm -rf -- "$STAGE"' EXIT
 PKG="$STAGE/winsnipper"
@@ -24,27 +32,23 @@ rm -rf "$PKG/usr/share/gnome-shell/extensions/$UUID/schemas"
 cp -R "$ROOT/editor" "$PKG/usr/share/winsnipper/editor"
 rm -rf "$PKG/usr/share/winsnipper/editor/tests" "$PKG/usr/share/winsnipper/editor/README.md"
 find "$PKG/usr/share/winsnipper/editor" \( -name __pycache__ -o -name '*.pyc' \) -prune -exec rm -rf {} +
-install -m 644 "$ROOT/tools/keybindings.py" "$PKG/usr/share/winsnipper/tools/keybindings.py"
+install -m 644 "$ROOT/tools/keybindings.py" "$ROOT/tools/install.py" "$PKG/usr/share/winsnipper/tools/"
 install -m 755 "$ROOT/packaging/winsnipper-setup" "$PKG/usr/bin/winsnipper-setup"
 install -m 644 "$ROOT/README.md" "$PKG/usr/share/doc/winsnipper/README.md"
 
 cat > "$PKG/usr/bin/winsnipper-editor" <<'SH'
 #!/usr/bin/env bash
-exec python3 /usr/share/winsnipper/editor/winsnipper_editor.py "$@"
+exec /usr/bin/python3 /usr/share/winsnipper/editor/winsnipper_editor.py "$@"
 SH
 chmod 755 "$PKG/usr/bin/winsnipper-editor"
 
-cat > "$PKG/usr/share/applications/io.github.winsnipper.Editor.desktop" <<'INI'
-[Desktop Entry]
-Type=Application
-Name=WinSnipper Editor
-Exec=/usr/bin/winsnipper-editor %U
-Icon=accessories-screenshot
-DBusActivatable=true
-NoDisplay=true
-Terminal=false
-MimeType=image/png;
-INI
+python3 - "$ROOT" "$PKG/usr/share/applications/io.github.winsnipper.Editor.desktop" <<'PYTHON'
+from pathlib import Path
+import sys
+sys.path.insert(0, sys.argv[1])
+from tools.install import desktop_entry
+Path(sys.argv[2]).write_text(desktop_entry('/usr/bin/winsnipper-editor'))
+PYTHON
 
 cat > "$PKG/usr/share/dbus-1/services/io.github.winsnipper.Editor.service" <<'INI'
 [D-BUS Service]
@@ -79,8 +83,8 @@ Homepage: https://github.com/AKolenda/winsnipper
 Description: Windows-style Super+Shift+S snipping for GNOME Shell
  Freezes the screen before the selection UI appears, so hover states are kept,
  copies the snip, saves it to Pictures/Screenshots and opens an annotation
- editor from the toast. Each user's shortcut is taken over at their next login;
- run winsnipper-setup --remove to restore the original bindings.
+ editor from the toast. Each user's shortcut is configured at GNOME login;
+ winsnipper-setup --remove restores unchanged original bindings.
 CONTROL
 
 DEB="$OUT_DIR/winsnipper_${VERSION}_all.deb"

@@ -3,8 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 UUID='winsnipper@winsnipper.local'
-DATA_DIR="$HOME/.local/share/winsnipper"
-EXTENSION_DIR="$HOME/.local/share/gnome-shell/extensions/$UUID"
+DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+DATA_DIR="$DATA_HOME/winsnipper"
 DRY_RUN=false
 for arg in "$@"; do
     case "$arg" in
@@ -13,37 +13,25 @@ for arg in "$@"; do
         *) printf 'Unknown option: %s\n' "$arg" >&2; exit 2 ;;
     esac
 done
-
 if "$DRY_RUN"; then
-    printf '%s\n' \
-        "Would disable $UUID and remove it from enabled-extensions." \
-        "Would remove $EXTENSION_DIR and $DATA_DIR/editor/." \
-        "Would remove $HOME/.local/bin/winsnipper-editor." \
-        "Would remove io.github.winsnipper.Editor.desktop and io.github.winsnipper.Editor.service." \
-        "Would restore original keybindings from $DATA_DIR/keybinding-backup.json, then delete the backup." \
-        'Would run update-desktop-database if available. Saved screenshots are retained.'
+    printf '%s\n' "Would disable $UUID, restore unchanged keybindings, and remove WinSnipper program files." \
+        "Would preserve unavailable keybinding records in $DATA_DIR/keybinding-backup.json." \
+        'Saved screenshots are retained.'
     exit 0
 fi
-
-if ! command -v python3 >/dev/null 2>&1 || ! command -v gsettings >/dev/null 2>&1; then
-    printf 'python3 and gsettings are required to safely restore keybindings.\n' >&2
-    exit 1
+if ! command -v python3 >/dev/null 2>&1; then
+    printf 'python3 is required to safely uninstall WinSnipper.\n' >&2; exit 1
 fi
-HELPER="$SCRIPT_DIR/tools/keybindings.py"
-if [[ ! -f "$HELPER" ]]; then
-    HELPER="$DATA_DIR/tools/keybindings.py"
+HELPER_DIR="$SCRIPT_DIR/tools"
+if [[ ! -f "$HELPER_DIR/install.py" ]]; then HELPER_DIR="$DATA_DIR/tools"; fi
+python3 "$HELPER_DIR/install.py" check
+if command -v gsettings >/dev/null 2>&1; then
+    if command -v gnome-extensions >/dev/null 2>&1; then gnome-extensions disable "$UUID" || true; fi
+    python3 "$HELPER_DIR/keybindings.py" disable-extension
+    python3 "$HELPER_DIR/keybindings.py" --backup "$DATA_DIR/keybinding-backup.json" restore
+elif [[ -e "$DATA_DIR/keybinding-backup.json" ]]; then
+    printf 'gsettings is required to restore saved keybindings; program files were retained.\n' >&2; exit 1
 fi
-if command -v gnome-extensions >/dev/null 2>&1; then
-    gnome-extensions disable "$UUID" || true
-fi
-python3 "$HELPER" disable-extension
-# Restore before removing files so a failed restoration keeps the helper/backup.
-python3 "$HELPER" --backup "$DATA_DIR/keybinding-backup.json" restore
-rm -rf -- "$EXTENSION_DIR" "$DATA_DIR/editor" "$DATA_DIR/tools"
-rm -f -- "$HOME/.local/bin/winsnipper-editor" \
-    "$HOME/.local/share/applications/io.github.winsnipper.Editor.desktop" \
-    "$HOME/.local/share/dbus-1/services/io.github.winsnipper.Editor.service"
-if command -v update-desktop-database >/dev/null 2>&1; then
-    update-desktop-database "$HOME/.local/share/applications" || true
-fi
-printf '%s\n' 'WinSnipper uninstalled; original keybindings restored. Saved screenshots are retained.'
+python3 "$HELPER_DIR/install.py" uninstall
+if command -v update-desktop-database >/dev/null 2>&1; then update-desktop-database "$DATA_HOME/applications" || true; fi
+printf '%s\n' 'WinSnipper uninstalled. Saved screenshots are retained.'

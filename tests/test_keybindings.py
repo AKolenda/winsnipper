@@ -113,7 +113,6 @@ class ScanTests(unittest.TestCase):
 
     def test_new_reinstall_conflicts_merge_and_preserve_first_originals(self):
         settings = FakeSettings()
-        original = settings.values.copy()
         with tempfile.TemporaryDirectory() as directory:
             backup = Path(directory) / 'backup.json'
             kb.disable(settings, backup)
@@ -134,7 +133,7 @@ class ScanTests(unittest.TestCase):
             self.assertEqual(merged[-1]['original'], before[new_key])
             self.assertFalse(kb.scan(settings))
             kb.restore(settings, backup)
-            self.assertEqual(settings.values[old_key], original[old_key])
+            self.assertEqual(settings.values[old_key], "['F12']")
             self.assertEqual(settings.values[new_key], before[new_key])
 
     def test_failed_backup_merge_leaves_record_and_settings_intact(self):
@@ -162,6 +161,107 @@ class ScanTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'write failed'):
                     kb.restore(settings, backup)
             self.assertTrue(backup.exists())
+
+    def test_restore_preserves_shortcuts_changed_after_setup(self):
+        settings = FakeSettings()
+        with tempfile.TemporaryDirectory() as directory:
+            backup = Path(directory) / 'backup.json'
+            kb.disable(settings, backup)
+            key = ('org.gnome.shell.keybindings', 'screenshot')
+            settings.values[key] = "['F12']"
+            kb.restore(settings, backup)
+            self.assertEqual(settings.values[key], "['F12']")
+            self.assertFalse(backup.exists())
+
+    def test_unavailable_schemas_and_keys_remain_restorable(self):
+        settings = FakeSettings()
+        with tempfile.TemporaryDirectory() as directory:
+            backup = Path(directory) / 'backup.json'
+            kb.disable(settings, backup)
+            key = ('org.gnome.shell.keybindings', 'screenshot')
+            replacement = settings.values.pop(key)
+            kb.restore(settings, backup)
+            self.assertEqual(len(json.loads(backup.read_text())['bindings']), 1)
+            settings.values[key] = replacement
+            kb.restore(settings, backup)
+            self.assertIn('<Super><Shift>s', settings.values[key])
+            self.assertFalse(backup.exists())
+
+    def test_unavailable_schema_records_are_retained(self):
+        settings = FakeSettings()
+        with tempfile.TemporaryDirectory() as directory:
+            backup = Path(directory) / 'backup.json'
+            kb.disable(settings, backup)
+            original_run = settings.run
+            def without_shell_schema(*args):
+                result = original_run(*args)
+                return result.replace(kb.SCHEMAS[0], '') if args[0] == 'list-schemas' else result
+            with patch.object(settings, 'run', side_effect=without_shell_schema):
+                kb.restore(settings, backup)
+            saved = json.loads(backup.read_text())['bindings']
+            self.assertEqual([item['schema'] for item in saved], [kb.SCHEMAS[0]])
+            kb.restore(settings, backup)
+            self.assertFalse(backup.exists())
+
+    def test_initial_write_failure_never_leaves_partial_backup_or_changes_settings(self):
+        settings = FakeSettings()
+        before = settings.values.copy()
+        with tempfile.TemporaryDirectory() as directory:
+            backup = Path(directory) / 'backup.json'
+            with patch('tools.keybindings.os.replace', side_effect=OSError('disk full')):
+                with self.assertRaises(OSError):
+                    kb.disable(settings, backup)
+            self.assertFalse(backup.exists())
+            self.assertEqual(settings.values, before)
+            self.assertEqual(list(backup.parent.iterdir()), [])
+
+    def test_backup_is_private_and_symlinks_are_rejected(self):
+        settings = FakeSettings()
+        with tempfile.TemporaryDirectory() as directory:
+            backup = Path(directory) / 'backup.json'
+            kb.disable(settings, backup)
+            self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
+            linked = Path(directory) / 'linked.json'
+            linked.symlink_to(backup)
+            before = backup.read_bytes()
+            with self.assertRaisesRegex(ValueError, 'symbolic link'):
+                kb.restore(settings, linked)
+            self.assertEqual(backup.read_bytes(), before)
+
+    def test_other_user_writable_backup_is_rejected(self):
+        settings = FakeSettings()
+        with tempfile.TemporaryDirectory() as directory:
+            backup = Path(directory) / 'backup.json'
+            kb.disable(settings, backup)
+            backup.chmod(0o666)
+            before = settings.values.copy()
+            with self.assertRaisesRegex(ValueError, 'other users'):
+                kb.restore(settings, backup)
+            self.assertEqual(settings.values, before)
+
+    def test_invalid_backup_cannot_modify_unrelated_settings(self):
+        settings = FakeSettings()
+        candidates = [None, [], {'version': 99, 'bindings': []},
+                      {'version': 1, 'bindings': 'invalid'},
+                      {'version': 1, 'bindings': [{'schema': 'org.gnome.shell',
+                        'key': 'enabled-extensions', 'original': "['<Super><Shift>s']",
+                        'replacement': '[]'}]},
+                      {'version': 1, 'bindings': [{'schema': kb.SCHEMAS[0],
+                        'key': 'screenshot', 'original': "['F12']", 'replacement': '[]'}]}]
+        with tempfile.TemporaryDirectory() as directory:
+            backup = Path(directory) / 'backup.json'
+            for saved in candidates:
+                with self.subTest(saved=saved):
+                    backup.write_text(json.dumps(saved))
+                    with self.assertRaises(ValueError):
+                        kb.restore(settings, backup)
+                    self.assertTrue(backup.exists())
+                    self.assertFalse(any(call[0] == 'set' for call in settings.calls))
+
+    def test_disabling_extension_on_non_gnome_desktop_is_noop(self):
+        settings = FakeSettings()
+        with patch.object(settings, 'run', return_value=''):
+            kb.set_extension_enabled(settings, False)
 
     def test_enable_preserves_other_extensions_and_prevents_duplicates(self):
         settings = FakeSettings()

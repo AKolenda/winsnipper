@@ -2,5 +2,9 @@
   "name": "winsnipper-shell-tests",
   "private": true,
   "type": "module",
-  "scripts": {"test": "node --test tests/*.test.js"}
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "test:installer": "python3 -m unittest discover -s tests -p \"test_*.py\"",
+    "test:editor": "python3 -m unittest discover -s editor/tests"
+  }
 }

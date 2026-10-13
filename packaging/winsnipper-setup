@@ -3,40 +3,54 @@
 set -euo pipefail
 
 UUID='winsnipper@winsnipper.local'
-HELPER=/usr/share/winsnipper/tools/keybindings.py
+TOOLS=/usr/share/winsnipper/tools
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/winsnipper"
 BACKUP="$DATA_DIR/keybinding-backup.json"
-# Written by the first setup/remove; stops the login autostart from undoing a choice.
 MARKER="$DATA_DIR/setup-done"
 
 usage() {
-    printf '%s\n' "Usage: winsnipper-setup [--remove | --first-run]" \
-        '  (no option)  take over Super+Shift+S and enable the WinSnipper extension' \
-        '  --remove     restore the original Super+Shift+S bindings and disable WinSnipper' \
-        '  --first-run  like no option, but only if setup has never run for this user'
+    printf '%s\n' 'Usage: winsnipper-setup [--remove | --first-run]' \
+        '  (no option)  take over Super+Shift+S and enable the GNOME extension' \
+        '  --remove     restore unchanged original bindings and disable the extension' \
+        '  --first-run  configure GNOME once; later user choices are retained'
 }
-
-enable() {
+[[ $# -le 1 ]] || { usage >&2; exit 2; }
+case "${1:-}" in
+    -h|--help) usage; exit 0 ;;
+    ''|--first-run|--remove) ;;
+    *) usage >&2; exit 2 ;;
+esac
+# Never configure GNOME settings from another desktop's session.
+if [[ "${1:-}" == --first-run ]]; then
+    DESKTOP_NAME="${XDG_CURRENT_DESKTOP:-}"
+    [[ "${DESKTOP_NAME^^}" == *GNOME* ]] || exit 0
+fi
+python3 "$TOOLS/install.py" check
+if [[ -L "$MARKER" ]]; then
+    printf 'Refusing symbolic link for setup marker: %s\n' "$MARKER" >&2; exit 1
+fi
+mark_done() {
     mkdir -p "$DATA_DIR"
-    python3 "$HELPER" --backup "$BACKUP" disable
-    python3 "$HELPER" enable-extension
-    gnome-extensions enable "$UUID" 2>/dev/null || true
-    touch "$MARKER"
+    local marker_temp
+    marker_temp=$(mktemp "$DATA_DIR/.setup-done.XXXXXX")
+    mv -fT -- "$marker_temp" "$MARKER"
 }
-
+enable() {
+    python3 "$TOOLS/keybindings.py" --backup "$BACKUP" disable
+    python3 "$TOOLS/keybindings.py" enable-extension
+    gnome-extensions enable "$UUID" 2>/dev/null || true
+    mark_done
+}
 case "${1:-}" in
     '')
         enable
-        printf '%s\n' 'WinSnipper enabled. If Super+Shift+S does nothing yet, log out and back in once.' ;;
+        printf '%s\n' 'WinSnipper enabled. Log out and back in once if needed.' ;;
     --first-run)
         [[ -e "$MARKER" ]] || enable ;;
     --remove)
         gnome-extensions disable "$UUID" 2>/dev/null || true
-        python3 "$HELPER" disable-extension
-        python3 "$HELPER" --backup "$BACKUP" restore
-        mkdir -p "$DATA_DIR"
-        touch "$MARKER"
-        printf '%s\n' 'WinSnipper disabled; original Super+Shift+S bindings restored.' ;;
-    -h|--help) usage ;;
-    *) usage >&2; exit 2 ;;
+        python3 "$TOOLS/keybindings.py" disable-extension
+        python3 "$TOOLS/keybindings.py" --backup "$BACKUP" restore
+        mark_done
+        printf '%s\n' 'WinSnipper disabled; unchanged original bindings restored.' ;;
 esac

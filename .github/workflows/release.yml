@@ -1,7 +1,5 @@
 name: Test and release .deb
 
-# Every push to master that passes the checks publishes v<VERSION>.<run number>
-# with the .deb attached. Pull requests only run the checks.
 on:
   push:
     branches: [master]
@@ -16,44 +14,69 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  checks:
+    # Pull-request code runs only on a fresh GitHub-hosted VM with a read-only token.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends python3-gi python3-gi-cairo python3-cairo gir1.2-gtk-4.0 gjs xvfb xauth dbus-x11 desktop-file-utils shellcheck xdg-desktop-portal weston
+      - name: Shell, installer, and packaging checks
+        run: |
+          set -Eeuo pipefail
+          npm test
+          /usr/bin/python3 -m unittest discover -s tests -p 'test_*.py'
+          find extension -name '*.js' -print0 | xargs -0 -r -n1 node --check
+          shellcheck install.sh uninstall.sh packaging/build-deb.sh packaging/winsnipper-setup .github/scripts/*.sh
+          glib-compile-schemas --strict --dry-run extension/schemas
+          for test in tests/gjs-*-smoke.js; do gjs -m "$test"; done
+      - name: GTK editor and D-Bus integration
+        env:
+          GTK_A11Y: none
+          GDK_BACKEND: x11
+          GSK_RENDERER: cairo
+          GSETTINGS_BACKEND: memory
+          WINSNIPPER_GTK_TESTS: '1'
+        run: |
+          set -Eeuo pipefail
+          xvfb-run -a dbus-run-session -- /usr/bin/python3 -m unittest discover -s editor/tests
+          xvfb-run -a dbus-run-session -- /usr/bin/python3 editor/tests/smoke_service.py
+      - name: Wayland editor and D-Bus integration
+        run: bash .github/scripts/check-wayland.sh
+      - name: Install, validate, and remove distro package
+        run: |
+          set -Eeuo pipefail
+          version="$(cat VERSION).${GITHUB_RUN_NUMBER}"
+          deb=$(packaging/build-deb.sh "$version" "$RUNNER_TEMP/dist")
+          sudo apt-get install --yes --no-install-recommends "$deb"
+          desktop-file-validate /usr/share/applications/io.github.winsnipper.Editor.desktop
+          /usr/bin/winsnipper-editor --help
+          sudo apt-get remove --yes winsnipper
   release:
-    runs-on: [self-hosted, Linux, X64, novapro-ci]
+    needs: checks
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
-      - name: Checks
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          node --test tests/*.test.js
-          python3 -m unittest discover -s tests -p 'test_keybindings.py'
-          find extension -name '*.js' -exec node --check {} \;
-          bash -n install.sh uninstall.sh packaging/build-deb.sh packaging/winsnipper-setup
-      - name: Build .deb
-        id: deb
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          version="$(tr -d '[:space:]' < VERSION).${{ github.run_number }}"
-          deb=$(packaging/build-deb.sh "$version" "$RUNNER_TEMP/dist")
-          dpkg-deb --info "$deb"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "deb=$deb" >> "$GITHUB_OUTPUT"
-      # Same job as the build: no artifact hand-off, so the account's artifact quota never matters.
-      - name: Publish release
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
-        shell: bash
+      # Rebuild trusted master in this clean job; no PR artifacts or artifact quota.
+      - name: Build and publish .deb
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.deb.outputs.version }}
-          DEB: ${{ steps.deb.outputs.deb }}
         run: |
           set -Eeuo pipefail
-          gh release create "v$VERSION" "$DEB" \
+          version="$(cat VERSION).${GITHUB_RUN_NUMBER}"
+          deb=$(packaging/build-deb.sh "$version" "$RUNNER_TEMP/dist")
+          gh release create "v$version" "$deb" \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "WinSnipper $VERSION" \
-            --notes "Install: \`sudo apt install ./winsnipper_${VERSION}_all.deb\`, then log out and back in. Super+Shift+S is taken over at that login; \`winsnipper-setup --remove\` restores the original shortcut."
+            --title "WinSnipper $version" \
+            --notes 'Install the .deb with apt. GNOME configures Super+Shift+S on next login. Run winsnipper-setup --remove to restore unchanged GNOME bindings.'
