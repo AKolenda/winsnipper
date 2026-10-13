@@ -1,4 +1,4 @@
-# WinSnipper — Windows-style Snipping Tool for GNOME (Zorin OS)
+# WinSnipper — Windows-style Snipping Tool for Linux
 
 Goal: Super+Shift+S **instantly freezes the screen exactly as it looks at the moment of the key press**
 (hover menus, tooltips, hover states preserved), lets the user select a region on the frozen image,
@@ -9,11 +9,35 @@ file and refreshes the clipboard. Must feel as fast as GNOME's built-in screensh
 Target: Zorin OS 18 (Ubuntu 24.04 base, **GNOME Shell 46**), Wayland session (X11 must also work).
 Extension metadata declares shell-version ["45","46","47","48","49"] (ESM extension format).
 
+## Portable capture
+
+The standalone GTK app also captures on X11 and Wayland through
+`org.freedesktop.portal.Screenshot`, without requiring the GNOME extension.
+`winsnipper` opens New snip controls; `winsnipper --capture` requests capture;
+`--mode choose|area|window|screen` and `--delay 0..60` configure the request.
+Ctrl+N opens snip controls from the editor; Ctrl+O opens a local PNG.
+
+The desktop must provide a Screenshot portal backend. Picker UI, permissions,
+supported targets and capture timing are desktop-owned. Screenshot v3 advertised
+targets receive matching target hints; older portals choose modes in their dialog.
+Portable operation does not guarantee frozen hover states, a uniform overlay, or
+cross-compositor window enumeration. The instant freeze requirements above apply
+to the GNOME extension path.
+
+Requests are asynchronous, single-flight, subscribed before invocation, cancellable
+with Request.Close, and bounded by a three-minute interaction timeout. The editor
+hides before capture and restores controls/windows on cancellation or failure.
+Returned local regular PNGs are copied into private owned
+`<XDG_PICTURES_DIR>/WinSnipper` files (0700 directory/0600 files) before validation,
+annotation, autosave or clipboard copy. Portal-owned originals are never edited.
+The input cap is less than 256 MiB encoded and 32 megapixels decoded. All import
+IO and image decoding run in workers.
+
 ## Architecture
 
 ```
 extension/   GNOME Shell extension (runs inside the compositor)  — capture, overlay, toast, clipboard
-editor/      GTK4 Python app (separate process, resident)        — annotation editor
+editor/      GTK4 Python app (separate process, resident)        — portal capture and annotation
 install.sh / uninstall.sh                                         — per-user install, no sudo
 ```
 
@@ -30,7 +54,7 @@ frame, *before* we push a modal grab (a grab sends pointer-leave to apps and kil
 | Shell D-Bus name / path / iface | `io.github.winsnipper.Shell` / `/io/github/winsnipper/Shell` / `io.github.winsnipper.Shell` |
 | Editor app id (GApplication + D-Bus name) | `io.github.winsnipper.Editor`, object path `/io/github/winsnipper/Editor` |
 | Editor install dir | `~/.local/share/winsnipper/editor/` |
-| Editor launcher | `~/.local/bin/winsnipper-editor` |
+| Editor launcher | `~/.local/bin/winsnipper-editor` (also `winsnipper` for capture) |
 | Editor desktop file | `~/.local/share/applications/io.github.winsnipper.Editor.desktop` (DBusActivatable=true) |
 | Editor D-Bus service | `~/.local/share/dbus-1/services/io.github.winsnipper.Editor.service` (Exec=`<launcher> --gapplication-service`) |
 | Keybinding backup | `~/.local/share/winsnipper/keybinding-backup.json` |

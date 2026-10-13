@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Installed launcher: python3 <editor-dir>/winsnipper_editor.py [PNG …]."""
+"""Installed launcher: python3 <editor-dir>/winsnipper_editor.py [--capture [--mode MODE] [--delay SECONDS] | PNG …]."""
 import sys
 
 
