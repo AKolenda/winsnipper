@@ -3,7 +3,8 @@
 Run `python3 editor/winsnipper_editor.py` for New snip / Open image controls,
 `python3 editor/winsnipper_editor.py --capture --mode area --delay 3` for a portal
 capture, or `python3 editor/winsnipper_editor.py /absolute/path/to/screenshot.png`
-to edit a file. Mode names are `choose`, `area`, `window`, `screen`; delay is 0–60
+to edit a file. Mode names are `choose`, `area`, `window`, `screen`, and explicit native-X11
+`x11-screen`; delay is 0–60
 seconds. Invalid combinations exit with status 2. CLI invocations forward to the
 resident process; `--gapplication-service` continues to start invisibly.
 The installer can copy this directory (excluding `tests/`) unchanged. Runtime
@@ -114,6 +115,20 @@ and removes partial/invalid copies; the portal source is never changed or remove
 Speculative prewarm submissions are deduplicated and limited to two pending paths;
 file opens are limited to eight concurrent loads, keeping D-Bus bursts from
 creating an unlimited executor queue. Additional concurrent opens can be retried.
+
+The optional `x11-screen` mode supports native X11 desktops without a Screenshot
+portal. `capture_x11.py` runs `x11_helper.py` in a separate process to keep GTK3
+and GTK4 isolated. Install `gir1.2-gtk-3.0` for this mode. The helper uses
+[GDK3 root-window capture](https://docs.gtk.org/gdk3/func.pixbuf_get_from_window.html),
+checks dimensions before allocation, and sends PNG data through a private file
+descriptor. A worker owns the child, temporary files and safe import; cancellation
+kills the child and a 20-second timeout bounds stalls. Environment checks and the
+[XWAYLAND extension](https://sources.debian.org/src/xorgproto/2024.1-1/xwaylandproto.txt/)
+refuse Wayland/Xwayland capture. No portal error or denial automatically triggers
+this path. The mode captures the full X11 root screen without a picker; use Crop
+for rectangular output. Real Xvfb pixel tests verify known root colours, output
+privacy, process cancellation and timeout cleanup. They do not validate every
+X11 compositor, unusual multi-screen topology or protected hardware surfaces.
 
 The view cache renders at the display scale when shrinking and uses native
 image resolution when zoomed, avoiding enormous zoom-scaled allocations. New

@@ -14,7 +14,14 @@ Extension metadata declares shell-version ["45","46","47","48","49"] (ESM extens
 The standalone GTK app also captures on X11 and Wayland through
 `org.freedesktop.portal.Screenshot`, without requiring the GNOME extension.
 `winsnipper` opens New snip controls; `winsnipper --capture` requests capture;
-`--mode choose|area|window|screen` and `--delay 0..60` configure the request.
+`--mode choose|area|window|screen` and `--delay 0..60` configure the portal request.
+Explicit `--mode x11-screen` captures the native X11 root screen using an optional
+isolated GTK3 helper (gir1.2-gtk-3.0). It has no picker/window-selection overlay;
+rectangles use the editor's Crop tool. It is never an automatic fallback after
+portal denial or failure. Session indicators and the XWAYLAND extension reject
+Wayland/Xwayland, and cancellation/20-second timeout terminate only the owned
+helper process. Private temporary captures are imported through the same bounded
+pipeline and then removed.
 Ctrl+N opens snip controls from the editor; Ctrl+O opens a local PNG.
 
 The desktop must provide a Screenshot portal backend. Picker UI, permissions,

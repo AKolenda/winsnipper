@@ -18,8 +18,13 @@ class CaptureWindow(Gtk.ApplicationWindow):
         title = Gtk.Label(label="Take a new screenshot", xalign=0)
         title.add_css_class("title-2")
         content.append(title)
-        self.mode = Gtk.DropDown.new_from_strings(
-            ["System dialog", "Rectangle", "Window", "Full screen"])
+        from .capture_x11 import native_x11_available
+        self.mode_ids = list(MODE_IDS)
+        labels = ["System dialog", "Rectangle", "Window", "Full screen"]
+        if native_x11_available():
+            self.mode_ids.append("x11-screen")
+            labels.append("X11 full screen (no picker)")
+        self.mode = Gtk.DropDown.new_from_strings(labels)
         self.mode.set_tooltip_text("Capture mode; older portals choose the mode in their system dialog")
         self.delay = Gtk.DropDown.new_from_strings(["No delay", "3 seconds", "5 seconds", "10 seconds"])
         self.delay.set_tooltip_text("Wait before asking the desktop to capture")
@@ -32,6 +37,7 @@ class CaptureWindow(Gtk.ApplicationWindow):
         self.status = Gtk.Label(
             label="Your desktop provides the capture picker and permission dialog. "
                   "Available modes vary by desktop.", wrap=True, xalign=0)
+        self.mode.connect("notify::selected", self._mode_changed)
         self.status.set_max_width_chars(52)
         self.status.set_vexpand(True)
         content.append(self.status)
@@ -39,7 +45,7 @@ class CaptureWindow(Gtk.ApplicationWindow):
         self.new_button = Gtk.Button(label="New snip")
         self.new_button.add_css_class("suggested-action")
         self.new_button.connect("clicked", lambda *_: application.start_capture(
-            MODE_IDS[self.mode.get_selected()], DELAYS[self.delay.get_selected()]))
+            self.mode_ids[self.mode.get_selected()], DELAYS[self.delay.get_selected()]))
         self.open_button = Gtk.Button(label="Open image…", action_name="app.open")
         self.cancel_button = Gtk.Button(label="Cancel")
         self.cancel_button.connect("clicked", lambda *_: application.cancel_capture())
@@ -52,6 +58,14 @@ class CaptureWindow(Gtk.ApplicationWindow):
         close = Gio.SimpleAction.new("close", None)
         close.connect("activate", lambda *_: self.close())
         self.add_action(close)
+
+    def _mode_changed(self, *_args):
+        if self.mode_ids[self.mode.get_selected()] == "x11-screen":
+            self.status.set_label("Capture the whole native X11 screen directly, without a picker. "
+                                  "Use Crop in the editor for a rectangle. GTK3 bindings are required.")
+        else:
+            self.status.set_label("Your desktop provides the capture picker and permission dialog. "
+                                  "Available modes vary by desktop.")
 
     def set_busy(self, busy, choosing=False):
         available = not busy and not choosing

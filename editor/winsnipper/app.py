@@ -29,9 +29,9 @@ class EditorApplication(Gtk.Application):
         self._open_dialog = None
         self._open_error_dialog = None
         self.add_main_option("capture", 0, GLib.OptionFlags.NONE, GLib.OptionArg.NONE,
-                             "Take a screenshot using the desktop portal", None)
+                             "Take a screenshot (system dialog by default)", None)
         self.add_main_option("mode", 0, GLib.OptionFlags.NONE, GLib.OptionArg.STRING,
-                             "Capture mode: choose, area, window, screen", "MODE")
+                             "Capture mode: choose, area, window, screen, x11-screen", "MODE")
         self.add_main_option("delay", 0, GLib.OptionFlags.NONE, GLib.OptionArg.INT,
                              "Delay before capture (0–60 seconds)", "SECONDS")
         self.add_main_option(GLib.OPTION_REMAINING, 0, GLib.OptionFlags.NONE,
@@ -124,8 +124,8 @@ class EditorApplication(Gtk.Application):
     def _option_error(options):
         mode, delay = options.get("mode", "choose"), options.get("delay", 0)
         capture, files = options.get("capture", False), options.get(GLib.OPTION_REMAINING, [])
-        if mode not in ("choose", "area", "window", "screen") or not 0 <= delay <= 60:
-            return "Choose mode choose/area/window/screen and delay 0–60 seconds."
+        if mode not in ("choose", "area", "window", "screen", "x11-screen") or not 0 <= delay <= 60:
+            return "Choose mode choose/area/window/screen/x11-screen and delay 0–60 seconds."
         if (not capture and ("mode" in options or "delay" in options)) or (capture and files):
             return "Use --mode and --delay with --capture; open PNG files separately."
         return None
@@ -182,7 +182,7 @@ class EditorApplication(Gtk.Application):
     def start_capture(self, mode="choose", delay=0):
         if self._capture_busy or self._open_dialog is not None or self._shutting_down:
             return
-        if mode not in ("choose", "area", "window", "screen") or not 0 <= delay <= 60:
+        if mode not in ("choose", "area", "window", "screen", "x11-screen") or not 0 <= delay <= 60:
             raise ValueError("Invalid capture mode or delay.")
         window = self.show_capture(present=delay > 0)
         self._capture_busy = True
@@ -210,6 +210,13 @@ class EditorApplication(Gtk.Application):
     def _request_capture(self, mode):
         from .capture import PortalCapture
         self._capture_timer = None
+        if mode == "x11-screen":
+            from .capture_x11 import X11Capture
+            pictures = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES)
+            pictures = pictures or str(Path.home() / "Pictures")
+            self.capture_request = X11Capture(self.executor, self.loader, pictures, self._x11_response)
+            self.capture_request.start()
+            return GLib.SOURCE_REMOVE
         self.capture_request = PortalCapture(self.get_dbus_connection(), self._capture_response,
                                              self.capture_window.status.set_label)
         self.capture_request.start(mode)
@@ -225,6 +232,10 @@ class EditorApplication(Gtk.Application):
         elif self.capture_request is not None:
             self.capture_request.cancel()
         # A received image is already importing in a bounded worker operation.
+
+    def _x11_response(self, path, image, error, cancelled):
+        self.capture_request = None
+        self._capture_finished(path=path, base=image, error=error, cancelled=cancelled)
 
     def _capture_response(self, uri, error, cancelled):
         self.capture_request = None

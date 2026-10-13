@@ -42,6 +42,15 @@ If the service is absent, denied, cancelled or times out, the app restores its
 controls and explains what happened. Portable captures open immediately for
 editing and copying; they do not use the GNOME extension toast.
 
+**Native X11 without a Screenshot portal (for example XFCE/MATE):** install the
+optional `gir1.2-gtk-3.0` package and select **X11 full screen (no picker)**, or run
+`winsnipper --capture --mode x11-screen`. This explicitly captures the X11 root
+screen; use the editor's Crop tool for a rectangle. It does not offer native window
+selection or a portal picker. GTK3 runs in an isolated helper process, so the
+editor remains GTK4. The app never switches to direct X11 capture automatically
+after a portal failure or denial. This mode is disabled on Wayland and detected
+Xwayland servers; Wayland always uses its compositor's Screenshot portal.
+
 Portal images are copied into private `Pictures/WinSnipper` files before editing
 (XDG Pictures location, falling back to `~/Pictures`). Autosave never overwrites
 the portal's source file. Existing `WinSnipper` output folders must have private
