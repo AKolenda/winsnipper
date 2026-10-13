@@ -166,19 +166,28 @@ class EditorApplication(Gtk.Application):
         if self.capture_window is None:
             from .capture_window import CaptureWindow
             self.capture_window = CaptureWindow(self)
+            self._sync_capture_controls()
         if present:
             self.capture_window.present()
         return self.capture_window
 
+    def _sync_capture_controls(self):
+        choosing = self._open_dialog is not None or self._shutting_down
+        available = not self._capture_busy and not choosing
+        for name in ("open", "new-snip", "capture"):
+            self.lookup_action(name).set_enabled(available)
+        if self.capture_window is not None:
+            self.capture_window.set_busy(self._capture_busy, choosing=choosing)
+
     def start_capture(self, mode="choose", delay=0):
-        if self._capture_busy or self._shutting_down:
+        if self._capture_busy or self._open_dialog is not None or self._shutting_down:
             return
         if mode not in ("choose", "area", "window", "screen") or not 0 <= delay <= 60:
             raise ValueError("Invalid capture mode or delay.")
         window = self.show_capture(present=delay > 0)
         self._capture_busy = True
         self.hold()
-        window.set_busy(True)
+        self._sync_capture_controls()
         remaining = delay
 
         def countdown():
@@ -238,6 +247,7 @@ class EditorApplication(Gtk.Application):
 
     def _capture_finished(self, path=None, base=None, error=None, cancelled=False):
         self._capture_busy = False
+        self._sync_capture_controls()
         for window in self._hidden_windows:
             if window is not self.capture_window and window.get_application() is self:
                 window.set_visible(True)
@@ -252,7 +262,6 @@ class EditorApplication(Gtk.Application):
                 window._clipboard(path)
             else:
                 window = self.show_capture()
-                window.set_busy(False)
                 window.status.set_label("Snip cancelled." if cancelled else str(error))
         finally:
             self.release()
@@ -319,37 +328,52 @@ class EditorApplication(Gtk.Application):
         self._open_error_dialog.set_application(self)
 
     def _choose_open(self):
-        if self._open_dialog is not None:
+        if self._capture_busy or self._open_dialog is not None or self._shutting_down:
             return
         self.hold()
-        if hasattr(Gtk, "FileDialog"):
-            dialog = Gtk.FileDialog(title="Open screenshot")
 
-            def chosen(source, result):
-                try:
-                    file = source.open_finish(result)
-                    self.do_open([file], 1, "")
-                except GLib.Error:
-                    pass  # user cancelled
-                finally:
-                    self._open_dialog = None
-                    self.release()
-            self._open_dialog = dialog
-            dialog.open(self.get_active_window(), None, chosen)
-        else:
-            dialog = Gtk.FileChooserNative(title="Open screenshot",
-                                           action=Gtk.FileChooserAction.OPEN,
-                                           accept_label="Open", cancel_label="Cancel")
+        def finished():
+            self._open_dialog = None
+            self._sync_capture_controls()
+            self.release()
 
-            def response(source, response_id):
-                if response_id == Gtk.ResponseType.ACCEPT:
-                    self.do_open([source.get_file()], 1, "")
-                source.destroy()
-                self._open_dialog = None
-                self.release()
-            self._open_dialog = dialog
-            dialog.connect("response", response)
-            dialog.show()
+        try:
+            if hasattr(Gtk, "FileDialog"):
+                dialog = Gtk.FileDialog(title="Open screenshot")
+
+                def chosen(source, result):
+                    try:
+                        file = source.open_finish(result)
+                        self.do_open([file], 1, "")
+                    except GLib.Error:
+                        pass  # user cancelled
+                    finally:
+                        finished()
+                self._open_dialog = dialog
+                self._sync_capture_controls()
+                dialog.open(self.get_active_window(), None, chosen)
+            else:
+                dialog = Gtk.FileChooserNative(title="Open screenshot", modal=True,
+                                               transient_for=self.get_active_window(),
+                                               action=Gtk.FileChooserAction.OPEN,
+                                               accept_label="Open", cancel_label="Cancel")
+
+                def response(source, response_id):
+                    try:
+                        if response_id == Gtk.ResponseType.ACCEPT:
+                            self.do_open([source.get_file()], 1, "")
+                    finally:
+                        source.destroy()
+                        finished()
+                self._open_dialog = dialog
+                self._sync_capture_controls()
+                dialog.connect("response", response)
+                dialog.show()
+        except (GLib.Error, RuntimeError) as error:
+            if isinstance(self._open_dialog, Gtk.NativeDialog):
+                self._open_dialog.destroy()
+            finished()
+            self._open_error(f"Could not open the file chooser.\n{error}")
 
     def do_shutdown(self):
         self._shutting_down = True

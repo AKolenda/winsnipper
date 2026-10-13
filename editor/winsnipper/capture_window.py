@@ -53,11 +53,12 @@ class CaptureWindow(Gtk.ApplicationWindow):
         close.connect("activate", lambda *_: self.close())
         self.add_action(close)
 
-    def set_busy(self, busy):
-        self.mode.set_sensitive(not busy)
-        self.delay.set_sensitive(not busy)
-        self.new_button.set_sensitive(not busy)
-        self.open_button.set_sensitive(not busy)
+    def set_busy(self, busy, choosing=False):
+        available = not busy and not choosing
+        self.mode.set_sensitive(available)
+        self.delay.set_sensitive(available)
+        self.new_button.set_sensitive(available)
+        self.open_button.set_sensitive(available)
         self.cancel_button.set_visible(busy)
 
     def _close_requested(self, *_args):

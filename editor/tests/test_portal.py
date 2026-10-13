@@ -4,6 +4,7 @@ No compositor is simulated: these tests verify our protocol and app lifecycle,
 not the availability or visual behavior of an actual desktop screenshot picker.
 """
 import os
+import builtins
 from pathlib import Path
 import subprocess
 import sys
@@ -216,6 +217,7 @@ class PortalTests(unittest.TestCase):
         self.assertEqual(window.path.parent, pictures / "WinSnipper")
         self.assertIsNone(self.application.capture_window)
         self.assertFalse(self.application._capture_busy)
+        self.assert_capture_actions(True)
         self.spin(lambda: clipboard.get_formats().contain_gtype(Gdk.Texture))
         from winsnipper.model import Stroke
         window.document.add_stroke(Stroke(((1, 1), (25, 25))))
@@ -308,6 +310,100 @@ assert restored and not timed_out
             self.application.activate_action("capture", None)
             self.spin(lambda: bool(self.application.windows_by_path))
         self.assertEqual(len(self.requests), 1)
+
+    def _native_chooser_only(self):
+        return patch("winsnipper.app.hasattr", side_effect=lambda obj, name:
+                     False if obj is Gtk and name == "FileDialog" else builtins.hasattr(obj, name),
+                     create=True)
+
+    def assert_capture_actions(self, enabled):
+        for name in ("open", "new-snip", "capture"):
+            self.assertEqual(self.application.lookup_action(name).get_enabled(), enabled, name)
+
+    def test_open_action_cannot_launch_chooser_during_countdown(self):
+        with self._native_chooser_only():
+            self.application.start_capture("area", 5)
+            try:
+                self.application.activate_action("open", None)
+                self.application._choose_open()  # Direct callers obey the same guard.
+                self.assertIsNone(self.application._open_dialog)
+                self.assert_capture_actions(False)
+                self.assertFalse(self.application.capture_window.open_button.get_sensitive())
+                self.assertFalse(self.application.capture_window.new_button.get_sensitive())
+            finally:
+                if self.application._open_dialog is not None:
+                    self.application._open_dialog.emit("response", Gtk.ResponseType.CANCEL)
+                self.application.cancel_capture()
+            self.assert_capture_actions(True)
+            self.assertTrue(self.application.capture_window.open_button.get_sensitive())
+            self.application.activate_action("open", None)
+            chooser = self.application._open_dialog
+            self.assertIsInstance(chooser, Gtk.FileChooserNative)
+            chooser.emit("response", Gtk.ResponseType.CANCEL)
+            self.assert_capture_actions(True)
+
+    def test_existing_native_chooser_prevents_capture_until_cancelled(self):
+        window = self.application.show_capture()
+        with self._native_chooser_only():
+            self.application.activate_action("open", None)
+            chooser = self.application._open_dialog
+            try:
+                self.application.start_capture("area", 0)
+                self.assertFalse(self.application._capture_busy)
+                self.assertIsNone(self.application._capture_timer)
+                self.assert_capture_actions(False)
+                self.assertFalse(window.new_button.get_sensitive())
+                self.assertFalse(window.mode.get_sensitive())
+            finally:
+                self.application.cancel_capture()
+                chooser.emit("response", Gtk.ResponseType.CANCEL)
+        self.assertIsNone(self.application._open_dialog)
+        self.assert_capture_actions(True)
+        self.assertTrue(window.new_button.get_sensitive())
+        self.application.start_capture("area", 5)
+        self.assertTrue(self.application._capture_busy)
+        self.application.cancel_capture()
+        self.assert_capture_actions(True)
+
+    def test_modern_chooser_callback_restores_capture_actions(self):
+        if not hasattr(Gtk, "FileDialog"):
+            self.skipTest("Gtk.FileDialog is unavailable on this GTK version")
+        callbacks = []
+        self.application.show_capture()
+        with patch.object(Gtk.FileDialog, "open", side_effect=lambda parent, cancellable, callback:
+                          callbacks.append(callback)):
+            self.application.activate_action("open", None)
+        dialog = self.application._open_dialog
+        self.assertIsInstance(dialog, Gtk.FileDialog)
+        try:
+            self.application.start_capture("area", 0)
+            self.assertFalse(self.application._capture_busy)
+            self.assert_capture_actions(False)
+        finally:
+            self.application.cancel_capture()
+            with patch.object(Gtk.FileDialog, "open_finish", side_effect=GLib.Error("User cancelled")):
+                callbacks[0](dialog, None)
+        self.assert_capture_actions(True)
+        self.assertTrue(self.application.capture_window.new_button.get_sensitive())
+
+    def test_chooser_start_failure_restores_capture_actions(self):
+        if not hasattr(Gtk, "FileDialog"):
+            self.skipTest("Gtk.FileDialog is unavailable on this GTK version")
+        self.application.show_capture()
+        with patch.object(Gtk.FileDialog, "open", side_effect=GLib.Error("Chooser unavailable")):
+            self.application.activate_action("open", None)
+        self.assertIsNone(self.application._open_dialog)
+        self.assert_capture_actions(True)
+        self.assertTrue(self.application.capture_window.new_button.get_sensitive())
+        self.application._open_error_dialog.response(Gtk.ResponseType.CLOSE)
+
+    def test_portal_failure_restores_capture_actions(self):
+        self.reply = 2
+        self.application.start_capture()
+        self.assert_capture_actions(False)
+        self.spin(lambda: not self.application._capture_busy)
+        self.assert_capture_actions(True)
+        self.assertTrue(self.application.capture_window.new_button.get_sensitive())
 
     def test_delay_cancel_and_duplicate_request(self):
         self.application.start_capture("area", 5)
