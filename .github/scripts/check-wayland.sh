@@ -23,7 +23,8 @@ backend=(--backend=headless-backend.so --use-pixman)
 if [[ "$weston_version" =~ ([0-9]+)\. ]] && (( BASH_REMATCH[1] >= 14 )); then
     backend=(--backend=headless --renderer=pixman)
 fi
-weston "${backend[@]}" --shell=kiosk-shell.so --socket="$WAYLAND_DISPLAY" \
+# Exercise normal desktop window/dialog lifecycles without kiosk-only policies.
+weston "${backend[@]}" --shell=desktop-shell.so --socket="$WAYLAND_DISPLAY" \
     --width=1280 --height=800 --idle-time=0 --no-config --log="$runtime_dir/weston.log" &
 weston_pid=$!
 for (( attempt=0; attempt<50; attempt++ )); do
