@@ -143,6 +143,25 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(fields[1], 'root/root')
             self.assertNotEqual(fields[0][8], 'w', line)
 
+    def test_extension_and_editor_bytecode_never_enter_package(self):
+        checkout = self.path / 'source-with-bytecode'
+        checkout.mkdir()
+        for name in ('extension', 'editor', 'tools', 'packaging'):
+            shutil.copytree(ROOT / name, checkout / name,
+                            ignore=shutil.ignore_patterns('tests', '__pycache__', '*.pyc'))
+        shutil.copy2(ROOT / 'README.md', checkout / 'README.md')
+        for name in ('extension', 'editor'):
+            cache = checkout / name / '__pycache__'
+            cache.mkdir()
+            (cache / 'generated.cpython-313.pyc').write_bytes(b'local bytecode')
+            (checkout / name / 'stale.pyc').write_bytes(b'old bytecode')
+        result = subprocess.run(['bash', str(checkout / 'packaging/build-deb.sh'),
+                                 '1.2.4', str(self.path / 'bytecode-build')],
+                                capture_output=True, text=True, check=True)
+        contents = subprocess.check_output(['dpkg-deb', '--contents', result.stdout.strip()], text=True)
+        self.assertNotIn('__pycache__', contents)
+        self.assertNotIn('.pyc', contents)
+
     def test_versions_cannot_inject_metadata_or_paths(self):
         output = self.path / 'must-not-exist'
         for version in ('1.0\nDepends: evil', '../escape', '1/../../escape', '-1', '1.0:bad'):
