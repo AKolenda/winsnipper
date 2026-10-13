@@ -13,11 +13,33 @@ UUID = 'winsnipper@winsnipper.local'
 APP_ID = 'io.github.winsnipper.Editor'
 
 
-def user_paths():
-    home = Path.home().absolute()
-    data = Path(os.environ.get('XDG_DATA_HOME') or home / '.local/share')
+def data_home():
+    data = Path(os.environ.get('XDG_DATA_HOME') or Path.home().absolute() / '.local/share')
     if not data.is_absolute():
         raise ValueError('XDG_DATA_HOME must be an absolute path')
+    return data
+
+
+def validate_paths(paths):
+    for path in paths:
+        if any(ord(char) < 32 or ord(char) == 127 for char in str(path)):
+            raise ValueError('Install paths cannot contain control characters')
+        # Refuse redirected managed files and parents before changing anything.
+        # This also prevents uninstall from removing files through a redirected parent.
+        for component in (path, *path.parents):
+            if component.is_symlink():
+                raise ValueError(f'Refusing symbolic link in install path: {component}')
+
+
+def check_setup_paths():
+    # Package setup changes only state here, not source-install destinations.
+    data = data_home() / 'winsnipper'
+    validate_paths((data, data / 'keybinding-backup.json', data / 'setup-done'))
+
+
+def user_paths():
+    home = Path.home().absolute()
+    data = data_home()
     paths = {
         'data': data / 'winsnipper',
         'extension': data / 'gnome-shell/extensions' / UUID,
@@ -27,14 +49,7 @@ def user_paths():
         'desktop': data / 'applications' / (APP_ID + '.desktop'),
         'service': data / 'dbus-1/services' / (APP_ID + '.service'),
     }
-    for path in paths.values():
-        if any(ord(char) < 32 or ord(char) == 127 for char in str(path)):
-            raise ValueError('Install paths cannot contain control characters')
-        # Refuse redirected managed files and parents before changing anything.
-        # This also prevents uninstall from removing files through a redirected parent.
-        for component in (path, *path.parents):
-            if component.is_symlink():
-                raise ValueError(f'Refusing symbolic link in install path: {component}')
+    validate_paths(paths.values())
     return paths
 
 
@@ -122,13 +137,15 @@ def uninstall():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('check', 'install', 'uninstall'))
+    parser.add_argument('command', choices=('check', 'check-setup', 'install', 'uninstall'))
     parser.add_argument('--portable', action='store_true')
     parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[1])
     args = parser.parse_args()
     try:
         if args.command == 'check':
             user_paths()
+        elif args.command == 'check-setup':
+            check_setup_paths()
         elif args.command == 'install':
             install(args.root, args.portable)
         else:
