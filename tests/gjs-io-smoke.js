@@ -15,9 +15,12 @@ await makeDirectories(directory, cancel, () => true);
 const file = directory.get_child('image.png');
 const output = await asyncCall(file, 'create_async', 'create_finish', [Gio.FileCreateFlags.NONE, 0, cancel]);
 const bytes = GLib.Bytes.new(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]));
-const result = await asyncCall(output, 'write_all_async', 'write_all_finish', [bytes.get_data(), 0, cancel]);
-assert(result[1] === 8, 'write_all_finish bytes written');
+const written = await asyncCall(output, 'splice_async', 'splice_finish',
+    [Gio.MemoryInputStream.new_from_bytes(bytes), Gio.OutputStreamSpliceFlags.CLOSE_SOURCE, 0, cancel]);
+assert(written === 8, 'splice_finish bytes written');
 await closeStream(output);
+const [, saved] = file.load_contents(null);
+assert(saved.every((value, index) => value === bytes.get_data()[index]), 'saved bytes match the PNG');
 const info = await asyncCall(file, 'query_info_async', 'query_info_finish', ['standard::type,standard::size', Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, 0, cancel]);
 assert(info.get_file_type() === Gio.FileType.REGULAR && info.get_size() === 8, 'regular file metadata');
 const input = await asyncCall(file, 'read_async', 'read_finish', [0, cancel]);
