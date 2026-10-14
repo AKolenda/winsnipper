@@ -83,8 +83,11 @@ export async function saveCapture(bytes, directory, cancellable, active) {
         }
         try {
             checkActive(active);
-            await asyncCall(stream, 'write_all_async', 'write_all_finish',
-                [bytes.get_data(), GLib.PRIORITY_DEFAULT, cancellable]);
+            // Not write_all_async: GJS frees the copied buffer before the write
+            // runs, saving freed memory. The input stream keeps the GBytes alive.
+            await asyncCall(stream, 'splice_async', 'splice_finish',
+                [Gio.MemoryInputStream.new_from_bytes(bytes),
+                    Gio.OutputStreamSpliceFlags.CLOSE_SOURCE, GLib.PRIORITY_DEFAULT, cancellable]);
             await closeStream(stream);
             checkActive(active);
             return file.get_path();
