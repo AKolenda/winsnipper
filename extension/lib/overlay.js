@@ -50,12 +50,6 @@ class SelectionOverlay extends St.Widget {
             this._toolbar.add_child(button);
             this._buttons.set(value, button);
         }
-        const primary = Main.layoutManager.primaryMonitor ?? bounds;
-        const [, toolbarWidth] = this._toolbar.get_preferred_width(-1);
-        const [, toolbarHeight] = this._toolbar.get_preferred_height(toolbarWidth);
-        this._toolbar.set_size(toolbarWidth, toolbarHeight);
-        this._toolbar.set_position(primary.x - bounds.x + (primary.width - toolbarWidth) / 2,
-            primary.y - bounds.y + 24);
         this.connect('captured-event', (_actor, event) => this._safe(() => {
             if (event.type() === Clutter.EventType.KEY_PRESS &&
                 event.get_key_symbol() === Clutter.KEY_Escape) {
@@ -71,7 +65,19 @@ class SelectionOverlay extends St.Widget {
         this.connect('button-press-event', (_actor, event) => this._safe(() => this._press(event)));
         this.connect('motion-event', (_actor, event) => this._safe(() => this._motion(event)));
         this.connect('button-release-event', (_actor, event) => this._safe(() => this._release(event)));
-        this._setMode(mode);
+    }
+
+    // St only resolves CSS (padding, fonts) for widgets on the stage, so the
+    // toolbar and size label must be measured after open() attaches the overlay.
+    _layout() {
+        const bounds = this._bounds;
+        const primary = Main.layoutManager.primaryMonitor ?? bounds;
+        const [, toolbarWidth] = this._toolbar.get_preferred_width(-1);
+        const [, toolbarHeight] = this._toolbar.get_preferred_height(toolbarWidth);
+        this._toolbar.set_size(toolbarWidth, toolbarHeight);
+        this._toolbar.set_position(primary.x - bounds.x + (primary.width - toolbarWidth) / 2,
+            primary.y - bounds.y + 24);
+        this._setMode(this._mode);
     }
 
     _safe(callback) {
@@ -88,6 +94,7 @@ class SelectionOverlay extends St.Widget {
 
     open() {
         Main.uiGroup.add_child(this);
+        this._layout();
         // Capture has already resolved: close popup grabs before taking ours.
         Main.layoutManager.emit('system-modal-opened');
         this._grab = Main.pushModal(this, {actionMode: Shell.ActionMode.NONE});

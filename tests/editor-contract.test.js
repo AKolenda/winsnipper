@@ -73,13 +73,14 @@ function overlayHarness() {
     });
     const overlay = new Overlay();
     overlay.grab_key_focus = () => {};
+    overlay._layout = () => events.push('layout');
     return {overlay, events};
 }
 
 test('overlay closes shell popup grabs before acquiring its modal grab', () => {
     const {overlay, events} = overlayHarness();
     overlay.open();
-    assert.deepEqual(events, ['attach', 'system-modal-opened', 'grab']);
+    assert.deepEqual(events, ['attach', 'layout', 'system-modal-opened', 'grab'], 'measured on stage');
 });
 
 test('unchanged rounded selection label skips layout but still repositions', () => {

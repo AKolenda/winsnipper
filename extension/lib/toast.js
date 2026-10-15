@@ -19,11 +19,15 @@ class SnipToast extends St.BoxLayout {
         this._closed = false;
         this._onOpen = onOpen;
         pixbuf = thumbnailPixbuf(pixbuf, St.ThemeContext.get_for_stage(global.stage).scale_factor);
-        // Same preview content API as Shell 45–49's ui/screenshot.js.
+        // Same preview content API as Shell 45–49's ui/screenshot.js; 48 added
+        // a leading CoglContext argument, so pick the form by arity.
         const content = St.ImageContent.new_with_preferred_size(pixbuf.width, pixbuf.height);
-        content.set_bytes(pixbuf.read_pixel_bytes(),
+        const args = [pixbuf.read_pixel_bytes(),
             pixbuf.get_has_alpha() ? Cogl.PixelFormat.RGBA_8888 : Cogl.PixelFormat.RGB_888,
-            pixbuf.width, pixbuf.height, pixbuf.rowstride);
+            pixbuf.width, pixbuf.height, pixbuf.rowstride];
+        if (content.set_bytes.length > args.length)
+            args.unshift(global.stage.context.get_backend().get_cogl_context());
+        content.set_bytes(...args);
         this._openButton = new St.Button({can_focus: true, x_expand: true,
             accessible_name: 'Open snip in WinSnipper Editor'});
         const row = new St.BoxLayout({style_class: 'winsnipper-toast-content'});
