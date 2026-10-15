@@ -5,6 +5,12 @@ The installer can copy this directory (excluding `tests/`) unchanged. Runtime
 packages on Zorin/Ubuntu are `python3-gi`, `python3-gi-cairo`, `python3-cairo`, and
 `gir1.2-gtk-4.0`. No libadwaita is used. `--gapplication-service` is supported.
 
+PNG files must be smaller than 256 MiB and contain no more than 134,217,728 pixels
+(128 × 1024 × 1024, 512 MiB per decoded raster). Full-screen snips span every monitor
+at the highest monitor scale, so a 2× laptop beside two 4K monitors produces
+18240 × 4320; that fits. The editor checks dimensions before decoding, including
+speculative preloads, so a small compressed file cannot force a huge allocation.
+
 `winsnipper_editor.py` is the entry point. `winsnipper/model.py` contains immutable
 strokes, crop viewports, and undo/redo; `render.py` contains cairo rendering,
 smoothed-path eraser hit testing, and the committed view cache; `saving.py`

@@ -40,6 +40,7 @@ class EditorWindow(Gtk.ApplicationWindow):
         self._points = []
         self._removed = set()
         self._erase_geometry = ()
+        self._stroke_geometry = {}
         self._crop_end = None
         self._closing = False
         self._exports = 0
@@ -308,9 +309,7 @@ class EditorWindow(Gtk.ApplicationWindow):
         self._crop_end = point
         self._removed = set()
         if self.tool == "eraser":
-            self._erase_geometry = tuple((points, stroke_bounds(s, points))
-                                         for s in self.document.state.strokes
-                                         for points in (flattened_points(s),))
+            self._erase_geometry = self._prepare_erase_geometry()
             self._erase_at(point, point)
         self._update_actions()
         self.area.queue_draw()
@@ -327,6 +326,22 @@ class EditorWindow(Gtk.ApplicationWindow):
         elif math.dist(point, self._points[-1]) >= 0.35 / max(self.zoom, 0.2):
             self._points.append(point)
         self.area.queue_draw()
+
+    def _prepare_erase_geometry(self):
+        # Identity keys avoid hashing every point in these immutable strokes.
+        # Keep the stroke with its geometry so an id cannot be reused, and
+        # retain only strokes in the current document, not its undo history.
+        cached = {}
+        geometry = []
+        for stroke in self.document.state.strokes:
+            entry = self._stroke_geometry.get(id(stroke))
+            if entry is None:
+                points = flattened_points(stroke)
+                entry = (stroke, (points, stroke_bounds(stroke, points)))
+            cached[id(stroke)] = entry
+            geometry.append(entry[1])
+        self._stroke_geometry = cached
+        return tuple(geometry)
 
     def _erase_at(self, start, end):
         for index, stroke in enumerate(self.document.state.strokes):
@@ -355,7 +370,8 @@ class EditorWindow(Gtk.ApplicationWindow):
                 self.cache.append(before, self.document.state, stroke)
         elif self._drag_tool == "eraser":
             changed = self.document.erase_indices(self._removed)
-            self.cache.invalidate()
+            if changed:
+                self.cache.invalidate()
         elif self._drag_tool == "crop":
             rect = self.document.state.crop.selection(self._points[0], self._crop_end)
             if rect is not None and rect.width * self.zoom >= 4 and rect.height * self.zoom >= 4:
@@ -378,8 +394,9 @@ class EditorWindow(Gtk.ApplicationWindow):
         self._erase_geometry = ()
 
     def _drag_cancel(self, *_args):
+        if self._removed:
+            self.cache.invalidate()
         self._reset_drag()
-        self.cache.invalidate()
         self._update_actions()
         self.area.queue_draw()
 
@@ -395,6 +412,9 @@ class EditorWindow(Gtk.ApplicationWindow):
         return False
 
     def _edited(self):
+        live_strokes = {id(stroke) for stroke in self.document.state.strokes}
+        self._stroke_geometry = {key: entry for key, entry in self._stroke_geometry.items()
+                                 if key in live_strokes}
         if self.fit_mode:
             self._fit_to_size()
         else:

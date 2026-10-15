@@ -5,7 +5,7 @@ import stat
 import threading
 import time
 
-from .render import BaseImage
+from .render import BaseImage, ImageTooLarge
 
 
 def image_key(path):
@@ -14,7 +14,7 @@ def image_key(path):
     if not stat.S_ISREG(info.st_mode):
         raise OSError('The screenshot is missing or is not a regular file.')
     if info.st_size >= 256 * 1024 * 1024:
-        raise OSError('The screenshot is too large (the limit is 256 MiB).')
+        raise ImageTooLarge('The screenshot is too large (the limit is 256 MiB).')
     if path.suffix.lower() != '.png':
         raise OSError('Please select a PNG screenshot.')
     return path, info.st_mtime_ns, info.st_size

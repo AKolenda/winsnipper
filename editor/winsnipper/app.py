@@ -6,6 +6,7 @@ import cairo
 
 from .gtk_support import Gio, GLib, Gtk, dispatch, show_error
 from .loading import ImageLoader
+from .render import ImageTooLarge
 
 APPLICATION_ID = "io.github.winsnipper.Editor"
 
@@ -111,6 +112,8 @@ class EditorApplication(Gtk.Application):
             self.loading.remove(path)
             try:
                 base = future.result()
+            except ImageTooLarge as error:
+                self._open_error(f"Could not open “{path.name}”.\n{error}")
             except (OSError, ValueError, cairo.Error):
                 self._open_error(f"Could not read “{path.name}”.\n"
                                  "The file may have moved or may not be a valid PNG image.")
