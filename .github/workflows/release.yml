@@ -17,7 +17,8 @@ concurrency:
 
 jobs:
   release:
-    runs-on: [self-hosted, Linux, X64, novapro-ci]
+    # GitHub-hosted: a public repo must never run fork PRs on a self-hosted runner.
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write

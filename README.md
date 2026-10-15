@@ -1,6 +1,8 @@
 # WinSnipper
 
 Windows-style snipping for GNOME Shell 45–49, targeting Zorin OS 18 / GNOME 46.
+Inspired by the Windows Snipping Tool: Super+Shift+S freezes the screen, you pick
+a region, and the snip lands on the clipboard ready to annotate.
 Works on Wayland and X11. Requires Python 3, PyGObject and GTK 4.
 
 **Debian package:** download `winsnipper_*_all.deb` from the latest GitHub release,
@@ -49,3 +51,9 @@ Development checks: `node --test tests/*.test.js`,
 Optional GJS IO/activation-signature check: `gjs -m tests/gjs-io-smoke.js`.
 GNOME capture/grab/clipboard/preview APIs were checked against upstream tags
 45.0, 46.0, 47.0, 48.0 and 49.0; desktop integration requires testing in a real session.
+
+## License
+
+WinSnipper is free software, released under the
+[GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only). It is not
+affiliated with or endorsed by Microsoft.

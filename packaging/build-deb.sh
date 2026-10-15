@@ -31,6 +31,7 @@ find "$PKG/usr/share/winsnipper/editor" \( -name __pycache__ -o -name '*.pyc' \)
 install -m 644 "$ROOT/tools/keybindings.py" "$PKG/usr/share/winsnipper/tools/keybindings.py"
 install -m 755 "$ROOT/packaging/winsnipper-setup" "$PKG/usr/bin/winsnipper-setup"
 install -m 644 "$ROOT/README.md" "$PKG/usr/share/doc/winsnipper/README.md"
+install -m 644 "$ROOT/LICENSE" "$PKG/usr/share/doc/winsnipper/copyright"
 
 cat > "$PKG/usr/bin/winsnipper-editor" <<'SH'
 #!/usr/bin/env bash
