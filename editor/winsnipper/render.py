@@ -9,8 +9,14 @@ import cairo
 from .model import Rect, State, Stroke
 
 HIGHLIGHT_ALPHA = 0.32
-# Up to 128 MiB per decoded ARGB raster; still accepts 7680 x 4320 screenshots.
-MAX_IMAGE_PIXELS = 32 * 1024 * 1024
+# Up to 512 MiB per decoded ARGB raster. Full-screen snips capture the whole
+# stage at the highest monitor scale, so a 2x laptop beside two 4K monitors
+# already yields 18240 x 4320; this still rejects Cairo's 32767 x 32767 maximum.
+MAX_IMAGE_PIXELS = 128 * 1024 * 1024
+
+
+class ImageTooLarge(OSError):
+    """An image exceeds a size limit; the message is shown to the user."""
 
 
 class _PngReader:
@@ -50,7 +56,8 @@ class BaseImage:
             if not width or not height:
                 raise OSError('The PNG dimensions must be positive.')
             if width * height > MAX_IMAGE_PIXELS:
-                raise OSError(f'The screenshot is too large (the pixel limit is {MAX_IMAGE_PIXELS:,}).')
+                raise ImageTooLarge(f'The screenshot is too large ({width:,} × {height:,}; '
+                                    f'the pixel limit is {MAX_IMAGE_PIXELS:,}).')
             # Keep the checked header and the same open file through decoding:
             # neither replacing the path nor changing its IHDR can bypass the cap.
             return cls.from_surface(cairo.ImageSurface.create_from_png(_PngReader(header, stream)))

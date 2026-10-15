@@ -2,11 +2,13 @@
 import os
 import builtins
 from pathlib import Path
+import struct
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
+import zlib
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -221,6 +223,20 @@ class GtkTests(unittest.TestCase):
         self.assertNotIn(corrupt, self.application.windows_by_path)
         errors = [w for w in self.application.get_windows() if isinstance(w, Gtk.MessageDialog)]
         self.assertEqual(len(errors), 1)
+        self.assertIn("may not be a valid PNG", errors[0].props.secondary_text)
+        errors[0].response(Gtk.ResponseType.CLOSE)
+
+        # A real size limit is explained instead of blamed on a moved/invalid file.
+        huge = Path(self.directory.name) / "huge.png"
+        data = b"IHDR" + struct.pack(">IIBBBBB", 32767, 32767, 8, 6, 0, 0, 0)
+        huge.write_bytes(b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + data
+                         + struct.pack(">I", zlib.crc32(data)))
+        self.application.open_path(huge)
+        self.spin(lambda: huge not in self.application.loading)
+        self.assertNotIn(huge, self.application.windows_by_path)
+        errors = [w for w in self.application.get_windows() if isinstance(w, Gtk.MessageDialog)]
+        self.assertEqual(len(errors), 1)
+        self.assertIn("pixel limit", errors[0].props.secondary_text)
         errors[0].response(Gtk.ResponseType.CLOSE)
 
     def record_snapshot(self, window):

@@ -13,7 +13,7 @@ import zlib
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import cairo
 from winsnipper.loading import ImageLoader, image_key
-from winsnipper.render import BaseImage, MAX_IMAGE_PIXELS
+from winsnipper.render import BaseImage, ImageTooLarge, MAX_IMAGE_PIXELS
 
 
 def png_header(width, height):
@@ -39,10 +39,12 @@ class PngLoadingTests(unittest.TestCase):
                 self.assertEqual((base.width, base.height), (3, 2))
                 self.assertEqual(base.pixels, bytes(surface.get_data()))
 
-    def test_pixel_budget_boundary_and_8k_reach_decoder_without_large_allocations(self):
+    def test_pixel_budget_boundary_and_full_desktop_captures_reach_decoder(self):
         surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1)
-        self.assertEqual(8192 * 4096, MAX_IMAGE_PIXELS)
-        for width, height in ((1, 1), (8192, 4096), (7680, 4320)):
+        self.assertEqual(16384 * 8192, MAX_IMAGE_PIXELS)
+        # 8K; three 5K monitors; a 2x laptop beside two 4K monitors (whole stage
+        # captured at the highest scale); the exact budget.
+        for width, height in ((1, 1), (7680, 4320), (15360, 2880), (18240, 4320), (16384, 8192)):
             with self.subTest(width=width, height=height):
                 header = png_header(width, height)
                 self.path.write_bytes(header)
@@ -55,13 +57,13 @@ class PngLoadingTests(unittest.TestCase):
                     surface_class.create_from_png.assert_called_once()
 
     def test_oversized_png_rejected_before_decode_for_open_and_prewarm(self):
-        for width, height in ((8193, 4096), (8192, 8192)):
+        for width, height in ((16385, 8192), (32767, 32767)):
             self.path.write_bytes(png_header(width, height))
             for prewarm in (False, True):
                 with self.subTest(width=width, height=height, prewarm=prewarm):
                     loader = ImageLoader()
                     with patch('winsnipper.render.cairo.ImageSurface') as surface_class:
-                        with self.assertRaisesRegex(OSError, 'pixel limit'):
+                        with self.assertRaisesRegex(ImageTooLarge, 'pixel limit'):
                             loader.load(self.path, prewarm)
                         surface_class.create_from_png.assert_not_called()
                     self.assertFalse(loader._cache)
@@ -90,7 +92,7 @@ class PngLoadingTests(unittest.TestCase):
         surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, 3, 2)
         surface.write_to_png(str(self.path))
         replacement = self.path.with_name('replacement.png')
-        replacement.write_bytes(png_header(8192, 8192))
+        replacement.write_bytes(png_header(32767, 32767))
         decode = cairo.ImageSurface.create_from_png
         with patch('winsnipper.render.cairo.ImageSurface') as surface_class:
             def replace_then_decode(stream):
@@ -110,7 +112,7 @@ class PngLoadingTests(unittest.TestCase):
                 patch('winsnipper.render.cairo.ImageSurface') as surface_class:
             def mutate_then_decode(stream):
                 with self.path.open('r+b') as changed:
-                    changed.write(png_header(8192, 8192))
+                    changed.write(png_header(32767, 32767))
                 return decode(stream)
             surface_class.create_from_png.side_effect = mutate_then_decode
             base = BaseImage.from_png(self.path)
