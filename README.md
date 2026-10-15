@@ -1,56 +1,139 @@
 # WinSnipper
 
-Windows-style snipping for GNOME Shell 45–49, targeting Zorin OS 18 / GNOME 46.
-Inspired by the Windows Snipping Tool: Super+Shift+S freezes the screen, you pick
-a region, and the snip lands on the clipboard ready to annotate.
-Works on Wayland and X11. Requires Python 3, PyGObject and GTK 4.
+**Windows-style snipping for GNOME.** Inspired by the Windows Snipping Tool: press
+**Super+Shift+S**, drag a region, and the snip is on your clipboard, ready to paste
+or mark up.
 
-**Debian package:** download `winsnipper_*_all.deb` from the latest GitHub release,
-run `sudo apt install ./winsnipper_*_all.deb`, then log out and back in. At that
-login each user's Super+Shift+S is taken over once (conflicts are backed up);
-`winsnipper-setup --remove` restores the original bindings and disables it, and
-`winsnipper-setup` turns it back on. Run `winsnipper-setup --remove` before
-`sudo apt remove winsnipper`. Releases are built by `.github/workflows/release.yml`
-on every push to master (`VERSION` plus the run number); build one locally with
-`packaging/build-deb.sh 0.1.0`.
+![Selecting a region with the WinSnipper overlay](docs/screenshots/overlay.jpg)
 
-**From a checkout:** run `./install.sh`. It installs per user without elevated
-privileges, enables the extension and backs up conflicting Super+Shift+S bindings.
-**On Wayland, log out and back in once.** `./install.sh --dry-run` previews actions
-without changing files or settings; dependency checks run during actual installation.
-The editor entry point must be present in `editor/` before installing.
+Supports GNOME Shell 45–49 on Wayland and X11. Built for Zorin OS 18 (GNOME 46).
 
-Press **Super+Shift+S**, choose Rectangle, Window or Fullscreen, then drag or click.
-Escape/right-click cancels. A snip is copied and saved to Pictures/Screenshots;
-click its bottom-right toast to annotate. Hover pauses dismissal. Extension
-preferences control destination, default mode and timeout (0 keeps the toast).
-Turning off “Save to disk” keeps an editor file in the user cache instead.
+## Features
 
-The compositor captures the stage **before** creating the selection UI or taking
-an input grab, preserving hover states. Selection uses the frozen image, with
-capture-scale cropping for HiDPI. After the UI is destroyed, PNG encoding, disk
-writes and editor D-Bus activation run asynchronously. The shell owns the image
-clipboard, so it survives editor exit. Repeated shortcuts during a snip are ignored.
+- **Freeze-frame capture.** The screen is captured the moment you press the
+  shortcut, before any UI appears, so menus, tooltips and hover states stay in the shot.
+- **Three modes:** Rectangle, Window or Fullscreen, chosen from the toolbar at the
+  top of the screen. A live `W × H` label follows your selection.
+- **Clipboard first.** Every snip is copied straight away and saved to
+  `Pictures/Screenshots`. The clipboard image survives after the editor closes.
+- **Notification toast.** A preview appears in the bottom-right corner. Click it
+  to annotate.
+- **Lightweight editor** (GTK 4): pen, highlighter, eraser and crop, with undo/redo.
+  Your edits save back to the same file automatically.
+- **HiDPI aware.** Crops are taken at the capture scale, so snips stay sharp on
+  scaled displays.
 
-Run `./uninstall.sh` to disable/remove the extension and editor and restore the
-original shortcut bindings. `--dry-run` is supported. Screenshots are retained.
-Reinstall preserves the first shortcut backup; if new conflicts appeared since
-installation, uninstall first to establish a fresh backup safely.
+<p align="center">
+  <img src="docs/screenshots/toast.png" alt="The toast shown after a snip" width="420">
+</p>
 
-If the shortcut does nothing, log out/in on Wayland and check
-`gnome-extensions info winsnipper@winsnipper.local`. Inspect errors with
-`journalctl --user -f /usr/bin/gnome-shell` (messages start with `[winsnipper]`).
-Check permissions on the save directory and that the editor launcher exists at
-`~/.local/bin/winsnipper-editor`. The installer prints the apt command when GTK
-bindings are missing. GNOME Shell 45 is the minimum; 46 is the primary target.
+## The editor
 
-Development checks: `node --test tests/*.test.js`,
-`python3 -m unittest discover -s tests -p 'test_keybindings.py'`,
-`find extension -name '*.js' -exec node --check {} \;`,
-`bash -n install.sh uninstall.sh`, and `shellcheck install.sh uninstall.sh`.
-Optional GJS IO/activation-signature check: `gjs -m tests/gjs-io-smoke.js`.
-GNOME capture/grab/clipboard/preview APIs were checked against upstream tags
-45.0, 46.0, 47.0, 48.0 and 49.0; desktop integration requires testing in a real session.
+![Annotating a snip in the WinSnipper editor](docs/screenshots/editor.png)
+
+| Action | Shortcut |
+| --- | --- |
+| Pen / Highlighter / Eraser / Crop | <kbd>P</kbd> / <kbd>H</kbd> / <kbd>E</kbd> / <kbd>X</kbd> |
+| Apply crop | <kbd>Enter</kbd> |
+| Cancel the current stroke or crop | <kbd>Esc</kbd> |
+| Undo / Redo | <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> or <kbd>Ctrl</kbd>+<kbd>Y</kbd> |
+| Copy the edited image | <kbd>Ctrl</kbd>+<kbd>C</kbd> |
+| Save as… | <kbd>Ctrl</kbd>+<kbd>S</kbd> |
+| Fit to window / Actual size | <kbd>Ctrl</kbd>+<kbd>0</kbd> / <kbd>Ctrl</kbd>+<kbd>1</kbd> |
+| Zoom | <kbd>Ctrl</kbd>+scroll |
+| Close | <kbd>Ctrl</kbd>+<kbd>W</kbd> |
+
+Use the header bar to set the colour and stroke thickness. The folder button
+opens the folder containing the screenshot.
+
+## Install
+
+### Debian package (recommended)
+
+Download `winsnipper_*_all.deb` from the
+[latest release](https://github.com/AKolenda/winsnipper/releases/latest), then:
+
+```sh
+sudo apt install ./winsnipper_*_all.deb
+```
+
+Log out and back in. On that first login WinSnipper takes over each user's
+Super+Shift+S, backing up any binding it replaces.
+
+- `winsnipper-setup --remove` restores the original bindings and disables WinSnipper.
+- `winsnipper-setup` turns it back on.
+- Run `winsnipper-setup --remove` before `sudo apt remove winsnipper`.
+
+### From a checkout
+
+```sh
+./install.sh            # per-user, no sudo; add --dry-run to preview
+```
+
+The installer enables the extension and backs up conflicting Super+Shift+S
+bindings. If GTK bindings are missing, it prints the `apt` command to install them.
+**On Wayland, log out and back in once.**
+
+`./uninstall.sh` (also supports `--dry-run`) removes the extension and editor and
+restores your original shortcuts. Your screenshots are kept. Reinstalling keeps
+the first shortcut backup. If new conflicts have appeared since you installed,
+uninstall first so a fresh backup is taken.
+
+**Requirements:** GNOME Shell 45+, Python 3, PyGObject and GTK 4.
+
+## Usage
+
+1. Press **Super+Shift+S**.
+2. Pick **Rectangle**, **Window** or **Fullscreen**, then drag or click.
+   **Esc** or right-click cancels.
+3. The snip is copied to the clipboard and saved. Click the toast to annotate it.
+   Hovering over the toast stops it from closing.
+
+Open the extension's preferences (Extensions app → WinSnipper) to change:
+
+| Setting | Default |
+| --- | --- |
+| Save to disk | On. When off, the editor works on a copy in your user cache. |
+| Save directory | `Pictures/Screenshots` |
+| Default mode | Rectangle |
+| Toast timeout | 7 seconds (`0` keeps it until dismissed) |
+
+## How it works
+
+The compositor captures the stage **before** the selection UI is created or any
+input grab is taken. You then select on that frozen image, cropped at capture
+scale for HiDPI. PNG encoding, the disk write and starting the editor over D-Bus
+all happen asynchronously, after the overlay is gone. GNOME Shell itself owns the
+clipboard image, so it survives the editor exiting. Pressing the shortcut again
+during a snip does nothing.
+
+## Troubleshooting
+
+- **Shortcut does nothing:** on Wayland, log out and back in, then check
+  `gnome-extensions info winsnipper@winsnipper.local`.
+- **Errors:** run `journalctl --user -f /usr/bin/gnome-shell` and look for lines
+  starting with `[winsnipper]`.
+- **Editor doesn't open:** make sure `winsnipper-editor` is on your `PATH`, or at
+  `~/.local/bin/winsnipper-editor` for checkout installs, and that you can write to
+  the save directory.
+
+## Development
+
+```sh
+node --test tests/*.test.js
+python3 -m unittest discover -s tests -p 'test_keybindings.py'
+find extension -name '*.js' -exec node --check {} \;
+bash -n install.sh uninstall.sh && shellcheck install.sh uninstall.sh
+gjs -m tests/gjs-io-smoke.js   # optional GJS IO / activation-signature check
+```
+
+The capture, grab, clipboard and preview APIs were checked against upstream GNOME
+Shell 45.0, 46.0, 47.0, 48.0 and 49.0. Desktop integration still needs testing in
+a real session.
+
+Every push to `master` builds and publishes a release
+(`.github/workflows/release.yml`, versioned as `VERSION` plus the run number).
+To build a package locally, run `packaging/build-deb.sh 0.1.0`.
 
 ## License
 
