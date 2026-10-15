@@ -1,11 +1,28 @@
 """Pure cairo rendering, shared smoothed geometry, and stroke erasing."""
 from dataclasses import dataclass
+import io
 import math
+import struct
+import zlib
 import cairo
 
 from .model import Rect, State, Stroke
 
 HIGHLIGHT_ALPHA = 0.32
+# Up to 128 MiB per decoded ARGB raster; still accepts 7680 x 4320 screenshots.
+MAX_IMAGE_PIXELS = 32 * 1024 * 1024
+
+
+class _PngReader:
+    """Replay the checked header even if another process changes the file."""
+
+    def __init__(self, header, stream):
+        self.header = io.BytesIO(header)
+        self.stream = stream
+
+    def read(self, size=-1):
+        prefix = self.header.read(size)
+        return prefix + self.stream.read(-1 if size < 0 else size - len(prefix))
 
 
 @dataclass(frozen=True)
@@ -24,7 +41,19 @@ class BaseImage:
 
     @classmethod
     def from_png(cls, path):
-        return cls.from_surface(cairo.ImageSurface.create_from_png(str(path)))
+        with open(path, "rb") as stream:
+            header = stream.read(33)
+            if (len(header) != 33 or header[:16] != b'\x89PNG\r\n\x1a\n\0\0\0\rIHDR'
+                    or zlib.crc32(header[12:29]) != struct.unpack('>I', header[29:33])[0]):
+                raise OSError('The PNG header is invalid or incomplete.')
+            width, height = struct.unpack('>II', header[16:24])
+            if not width or not height:
+                raise OSError('The PNG dimensions must be positive.')
+            if width * height > MAX_IMAGE_PIXELS:
+                raise OSError(f'The screenshot is too large (the pixel limit is {MAX_IMAGE_PIXELS:,}).')
+            # Keep the checked header and the same open file through decoding:
+            # neither replacing the path nor changing its IHDR can bypass the cap.
+            return cls.from_surface(cairo.ImageSurface.create_from_png(_PngReader(header, stream)))
 
     def surface(self):
         # Each thread gets its own surface and writable backing storage. The
