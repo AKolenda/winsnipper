@@ -1,4 +1,5 @@
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 
@@ -29,7 +30,8 @@ export default class WinSnipper extends Extension {
         const active = () => this._enabled && this._generation === generation;
         try {
             this._editor = new EditorClient(this._cancellable, active);
-            this._uploader = new Uploader(this._cancellable, active);
+            this._uploader = new Uploader(GLib.build_filenamev([GLib.get_user_cache_dir(), 'winsnipper']),
+                this._cancellable, active);
             this._service = new ShellService(() => this._startSnip(),
                 path => this._uploader.sync(path), this._cancellable, active);
             Main.wm.addKeybinding('snip-shortcut', this._settings, Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
@@ -201,6 +203,7 @@ export default class WinSnipper extends Extension {
         cleanup('toast', () => this._toast?.close());
         this._toast = null;
         cleanup('D-Bus service', () => this._service?.destroy());
+        cleanup('uploader', () => this._uploader?.destroy());
         this._service = null;
         this._editor = null;
         this._uploader = null;

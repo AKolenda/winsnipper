@@ -108,8 +108,13 @@ background, and copied again each time the editor saves an edit.
 
 If the share is not mounted, WinSnipper mounts it with the password saved in your
 keyring, or as a guest if the share allows that. To save the password, open the share
-once in Files, enter it and choose **Remember forever**. If a copy fails you get a
-notification, and the snip stays in `~/.cache/winsnipper`.
+once in Files, enter it and choose **Remember forever**.
+
+If the share can't be reached, snips wait in a queue and you get one notification.
+The queue retries in the background (after 30 seconds, doubling up to every 10
+minutes, and straight away when the network changes). It is saved to disk, so it
+survives logging out. Snipping is never slowed down while the queue waits; the
+snips stay in `~/.cache/winsnipper` until they are copied.
 
 ## How it works
 
@@ -138,6 +143,7 @@ python3 -m unittest discover -s tests -p 'test_keybindings.py'
 find extension -name '*.js' -exec node --check {} \;
 bash -n install.sh uninstall.sh && shellcheck install.sh uninstall.sh
 gjs -m tests/gjs-io-smoke.js   # optional GJS IO / activation-signature check
+gjs -m tests/gjs-upload-smoke.js [smb://server/share/test-folder]   # optional upload-queue check
 ```
 
 The capture, grab, clipboard and preview APIs were checked against upstream GNOME

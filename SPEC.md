@@ -42,6 +42,8 @@ frame, *before* we push a modal grab (a grab sends pointer-leave to apps and kil
   A Windows share (`\\server\share\dir`, read as `smb://server/share/dir`) or a non-`file` URI is a
   network folder: the snip is written to `$XDG_CACHE_HOME/winsnipper/` as usual, then copied there in
   the background, and copied again after each editor save (signalled by `SetClipboardImage`).
+  Copies run one at a time from a queue saved in `$XDG_CACHE_HOME/winsnipper/uploads.json`; failures
+  retry with backoff (30 s doubling to 10 min, or at once on a network change) and survive logout.
 - `toast-timeout` (i) default `7` seconds (0 = never auto-hide)
 - `default-mode` (s) default `'rectangle'` (one of rectangle|window|fullscreen)
 

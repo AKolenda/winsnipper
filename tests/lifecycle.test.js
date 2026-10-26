@@ -49,6 +49,7 @@ function harness() {
     const context = {
         Extension: Base,
         Gio: {Cancellable: class { cancel() { events.push('io:cancel'); } }},
+        GLib: {build_filenamev: parts => parts.join('/'), get_user_cache_dir: () => '/cache'},
         Meta: {KeyBindingFlags: {IGNORE_AUTOREPEAT: 1}},
         Shell: {Screenshot: class {}, ActionMode: {NORMAL: 1, OVERVIEW: 2}},
         Main: {layoutManager: layout, overview: {visible: false}, wm: {
@@ -74,6 +75,7 @@ function harness() {
         Uploader: class {
             start(path, directory) { events.push(`upload:${path}:${directory}`); }
             sync(path) { events.push(`sync:${path}`); }
+            destroy() { events.push('uploader:destroy'); }
         },
         saveCapture(...args) { events.push('save'); return saver(...args); },
         report(message) { events.push(`error:${message}`); },
@@ -143,7 +145,7 @@ test('disable during capture prevents overlay and releases every registered reso
     await flush();
     assert.deepEqual(events, afterDisable);
     for (const event of ['io:cancel', 'keybinding:remove', 'disconnect:monitors-changed',
-        'dbus:destroy'])
+        'dbus:destroy', 'uploader:destroy'])
         assert.ok(events.includes(event), event);
 });
 
