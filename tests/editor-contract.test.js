@@ -125,7 +125,8 @@ test('a slow editor copy never replaces a newer clipboard image', async () => {
             ClipboardType: {CLIPBOARD: 0}},
         checkActive() {}, warn() {},
     });
-    const service = new ShellService(() => {}, null, () => true);
+    const saved = [];
+    const service = new ShellService(() => {}, path => saved.push(path), null, () => true);
     const replies = [];
     const invocation = name => ({
         return_value: () => replies.push(`${name}:ok`),
@@ -148,4 +149,6 @@ test('a slow editor copy never replaces a newer clipboard image', async () => {
     await flush();
     assert.deepEqual(clipboard, ['NEW', 'SNIP'], 'a fresh snip wins over a pending editor copy');
     assert.equal(replies.at(-1), 'edit:Cancelled');
+    assert.deepEqual(saved, ['/tmp/new.png', '/tmp/old.png', '/tmp/edit.png'],
+        'every editor save is synced to the network folder, superseded or not');
 });

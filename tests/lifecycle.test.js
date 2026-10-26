@@ -22,6 +22,7 @@ function harness() {
     let encoder = async () => ({bytes: 'PNG', pixbuf: 'preview'});
     let saver = async () => '/tmp/shot.png';
     let snapshot = () => [];
+    let network = null;
     const signals = () => ({
         connect(name, handler) { events.push(`connect:${name}`); this[name] = handler; return name; },
         disconnect(id) { events.push(`disconnect:${id}`); delete this[id]; },
@@ -69,6 +70,11 @@ function harness() {
         snapshotWindows() { events.push('snapshot'); return snapshot(); },
         encodeCapture(...args) { events.push('encode'); return encoder(...args); },
         saveDirectory() { return '/tmp'; },
+        networkDirectory: () => network,
+        Uploader: class {
+            start(path, directory) { events.push(`upload:${path}:${directory}`); }
+            sync(path) { events.push(`sync:${path}`); }
+        },
         saveCapture(...args) { events.push('save'); return saver(...args); },
         report(message) { events.push(`error:${message}`); },
     };
@@ -78,6 +84,7 @@ function harness() {
     events.length = 0;
     return {extension, events, captures, layout, display, context,
         encoder(value) { encoder = value; }, saver(value) { saver = value; },
+        network(value) { network = value; },
         snapshot(value) { snapshot = value; }};
 }
 
@@ -110,6 +117,21 @@ test('completion closes overlay before encoding, shows toast and warms the saved
     extension.disable();
     captures[1].resolve(['late texture', 1]);
     await flush();
+});
+
+test('a network folder is uploaded after the local save; the toast and editor stay local', async () => {
+    const {extension, events, captures, network} = harness();
+    network('smb://nas/shots');
+    extension._startSnip();
+    captures[0].resolve(['frozen texture', 1]);
+    await flush();
+    extension._overlay.complete();
+    await flush();
+    assert.deepEqual(events.slice(4), ['overlay:close', 'encode', 'clipboard:set', 'save', 'toast:new',
+        'toast:show', 'editor:prewarm', 'upload:/tmp/shot.png:smb://nas/shots', 'editor:prewarm:/tmp/shot.png']);
+    await extension._toast.open();
+    assert.equal(events.at(-1), 'editor:open:/tmp/shot.png');
+    extension.disable();
 });
 
 test('disable during capture prevents overlay and releases every registered resource', async () => {

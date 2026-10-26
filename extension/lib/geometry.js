@@ -53,3 +53,16 @@ export function uniqueFilename(date, exists) {
             return candidate;
     }
 }
+
+// A Windows share (\\server\share\folder) becomes smb://server/share/folder.
+// Other URIs except file:// pass through; local paths return null.
+export function networkUri(location) {
+    const text = location.trim();
+    if (/^\\\\/.test(text)) {
+        const parts = text.split(/[\\/]+/).filter(Boolean);
+        return parts.length < 2 ? null : `smb://${parts.map(encodeURIComponent).join('/')}`;
+    }
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text) && !/^file:/i.test(text))
+        return text.replace(/\/+$/, '');
+    return null;
+}

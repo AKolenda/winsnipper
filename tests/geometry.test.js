@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {clampRect, hitTestWindows, logicalToTexture, normalizeRect,
+import {clampRect, hitTestWindows, logicalToTexture, networkUri, normalizeRect,
     toastPosition, uniqueFilename} from '../extension/lib/geometry.js';
 
 const bounds = {x: 0, y: 0, width: 1920, height: 1080};
@@ -98,4 +98,15 @@ test('crop property checks keep rounded pixels inside texture bounds', () => {
             assert.ok(result.x + result.width <= 40 && result.y + result.height <= 40);
         }
     }
+});
+
+test('Windows shares and URIs are network locations; local paths are not', () => {
+    assert.equal(networkUri('\\\\10.40.40.4\\screenshots\\Screenshots'), 'smb://10.40.40.4/screenshots/Screenshots');
+    assert.equal(networkUri('\\\\\\10.40.40.4\\screenshots\\Screenshots\\'), 'smb://10.40.40.4/screenshots/Screenshots');
+    assert.equal(networkUri(' \\\\nas\\My Shots '), 'smb://nas/My%20Shots');
+    assert.equal(networkUri('\\\\nas'), null);
+    assert.equal(networkUri('smb://nas/share/'), 'smb://nas/share');
+    assert.equal(networkUri('sftp://me@host/pics'), 'sftp://me@host/pics');
+    for (const local of ['', '~/Pictures', '/mnt/share', 'Pictures/Shots', 'file:///tmp'])
+        assert.equal(networkUri(local), null);
 });

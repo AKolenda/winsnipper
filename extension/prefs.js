@@ -17,7 +17,7 @@ export default class WinSnipperPreferences extends ExtensionPreferences {
         const saveRow = new Adw.ActionRow({title: 'Save to disk', subtitle: 'Otherwise keep the editor file in the cache directory', activatable_widget: save});
         saveRow.add_suffix(save);
         group.add(saveRow);
-        const directory = new Adw.EntryRow({title: 'Save directory (empty = Pictures/Screenshots)'});
+        const directory = new Adw.EntryRow({title: 'Save directory (empty = Pictures/Screenshots, or \\\\server\\share)'});
         settings.bind('save-directory', directory, 'text', Gio.SettingsBindFlags.DEFAULT);
         group.add(directory);
         const timeout = new Gtk.SpinButton({adjustment: new Gtk.Adjustment({lower: 0,

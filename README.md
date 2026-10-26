@@ -94,9 +94,22 @@ Open the extension's preferences (Extensions app → WinSnipper) to change:
 | Setting | Default |
 | --- | --- |
 | Save to disk | On. When off, the editor works on a copy in your user cache. |
-| Save directory | `Pictures/Screenshots` |
+| Save directory | `Pictures/Screenshots`. Also takes a network folder, see below. |
 | Default mode | Rectangle |
 | Toast timeout | 7 seconds (`0` keeps it until dismissed) |
+
+### Saving to a network folder
+
+Set **Save directory** to a Windows share such as `\\10.40.40.4\screenshots\Screenshots`,
+or to any GIO location such as `smb://10.40.40.4/screenshots/Screenshots`. Snipping
+stays just as fast: each snip is saved locally first (in `~/.cache/winsnipper`), and
+the toast and editor work on that copy. It is then copied to the share in the
+background, and copied again each time the editor saves an edit.
+
+If the share is not mounted, WinSnipper mounts it with the password saved in your
+keyring, or as a guest if the share allows that. To save the password, open the share
+once in Files, enter it and choose **Remember forever**. If a copy fails you get a
+notification, and the snip stays in `~/.cache/winsnipper`.
 
 ## How it works
 

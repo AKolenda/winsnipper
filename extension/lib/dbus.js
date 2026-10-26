@@ -70,10 +70,11 @@ async function readClipboardImage(path, cancellable, active) {
 }
 
 export class ShellService {
-    constructor(startSnip, cancellable, active) {
+    constructor(startSnip, imageSaved, cancellable, active) {
         this._active = active;
         this._cancellable = cancellable;
         this._startSnip = startSnip;
+        this._imageSaved = imageSaved;
         // Bumped by every clipboard write; an older request that finishes
         // reading later must not overwrite newer content.
         this._clipboardGeneration = 0;
@@ -108,6 +109,8 @@ export class ShellService {
             checkActive(this._active);
             const bytes = await readClipboardImage(path, this._cancellable, this._active);
             checkActive(this._active);
+            // The editor calls this after every save, so it also marks an edit.
+            this._imageSaved(path);
             if (generation !== this._clipboardGeneration) {
                 // Only for a newer write. On teardown the editor gets Error and
                 // falls back to its own clipboard, so the copy is not lost.
@@ -139,6 +142,7 @@ export class ShellService {
         this._object?.unexport();
         this._object = null;
         this._startSnip = null;
+        this._imageSaved = null;
     }
 }
 

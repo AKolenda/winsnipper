@@ -5,10 +5,11 @@ import Shell from 'gi://Shell';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {encodeCapture, requestCapture, saveCapture, saveDirectory, snapshotWindows} from './lib/capture.js';
+import {encodeCapture, networkDirectory, requestCapture, saveCapture, saveDirectory, snapshotWindows} from './lib/capture.js';
 import {EditorClient, ShellService} from './lib/dbus.js';
 import {SelectionOverlay} from './lib/overlay.js';
 import {SnipToast} from './lib/toast.js';
+import {Uploader} from './lib/upload.js';
 import {report} from './lib/log.js';
 
 export default class WinSnipper extends Extension {
@@ -28,7 +29,9 @@ export default class WinSnipper extends Extension {
         const active = () => this._enabled && this._generation === generation;
         try {
             this._editor = new EditorClient(this._cancellable, active);
-            this._service = new ShellService(() => this._startSnip(), this._cancellable, active);
+            this._uploader = new Uploader(this._cancellable, active);
+            this._service = new ShellService(() => this._startSnip(),
+                path => this._uploader.sync(path), this._cancellable, active);
             Main.wm.addKeybinding('snip-shortcut', this._settings, Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
                 Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW, () => this._startSnip());
             this._keybindingAdded = true;
@@ -140,7 +143,13 @@ export default class WinSnipper extends Extension {
         // Also supersedes editor copies still being read, so they cannot
         // replace this newer snip on the clipboard when they finish.
         this._service.setClipboardBytes(bytes);
+        const network = networkDirectory(this._settings);
         const saving = saveCapture(bytes, saveDirectory(this._settings), this._cancellable, active)
+            .then(path => {
+                if (network && active())
+                    this._uploader.start(path, network);
+                return path;
+            })
             .catch(error => {
                 if (active())
                     report('Could not encode or save snip', error);
@@ -194,6 +203,7 @@ export default class WinSnipper extends Extension {
         cleanup('D-Bus service', () => this._service?.destroy());
         this._service = null;
         this._editor = null;
+        this._uploader = null;
         this._shooter = null;
         this._settings = null;
         this._cancellable = null;

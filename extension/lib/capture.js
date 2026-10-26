@@ -2,7 +2,7 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
 
-import {logicalToTexture, uniqueFilename} from './geometry.js';
+import {logicalToTexture, networkUri, uniqueFilename} from './geometry.js';
 import {asyncCall, checkActive, closeStream, makeDirectories} from './io.js';
 import {warn} from './log.js';
 
@@ -45,8 +45,16 @@ export async function encodeCapture(content, scale, rect, active) {
     }
 }
 
+// Snips for a network folder are staged in the cache, so the toast and editor
+// never wait on the network; Uploader then copies them across.
+export function networkDirectory(settings) {
+    const uri = settings.get_boolean('save-to-disk') &&
+        networkUri(settings.get_string('save-directory'));
+    return uri ? Gio.File.new_for_uri(uri) : null;
+}
+
 export function saveDirectory(settings) {
-    if (!settings.get_boolean('save-to-disk'))
+    if (!settings.get_boolean('save-to-disk') || networkDirectory(settings))
         return GLib.build_filenamev([GLib.get_user_cache_dir(), 'winsnipper']);
     const custom = settings.get_string('save-directory');
     if (custom) {
@@ -60,8 +68,8 @@ export function saveDirectory(settings) {
     return GLib.build_filenamev([pictures, 'Screenshots']);
 }
 
-export async function saveCapture(bytes, directory, cancellable, active) {
-    const dir = Gio.File.new_for_path(directory);
+// Writes input into a new, uniquely named screenshot in dir and returns its GFile.
+export async function writeUnique(dir, input, flags, cancellable, active) {
     await makeDirectories(dir, cancellable, active);
     const date = new Date();
     const collisions = new Set();
@@ -74,7 +82,7 @@ export async function saveCapture(bytes, directory, cancellable, active) {
             // Exclusive creation handles races with other snips/processes without
             // any synchronous exists() check or overwriting an existing screenshot.
             stream = await asyncCall(file, 'create_async', 'create_finish',
-                [Gio.FileCreateFlags.PRIVATE, GLib.PRIORITY_DEFAULT, cancellable]);
+                [flags, GLib.PRIORITY_DEFAULT, cancellable]);
         } catch (error) {
             if (!error.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.EXISTS))
                 throw error;
@@ -83,14 +91,11 @@ export async function saveCapture(bytes, directory, cancellable, active) {
         }
         try {
             checkActive(active);
-            // Not write_all_async: GJS frees the copied buffer before the write
-            // runs, saving freed memory. The input stream keeps the GBytes alive.
             await asyncCall(stream, 'splice_async', 'splice_finish',
-                [Gio.MemoryInputStream.new_from_bytes(bytes),
-                    Gio.OutputStreamSpliceFlags.CLOSE_SOURCE, GLib.PRIORITY_DEFAULT, cancellable]);
+                [input, Gio.OutputStreamSpliceFlags.CLOSE_SOURCE, GLib.PRIORITY_DEFAULT, cancellable]);
             await closeStream(stream);
             checkActive(active);
-            return file.get_path();
+            return file;
         } catch (error) {
             try {
                 if (!stream.is_closed())
@@ -103,4 +108,12 @@ export async function saveCapture(bytes, directory, cancellable, active) {
             throw error;
         }
     }
+}
+
+export async function saveCapture(bytes, directory, cancellable, active) {
+    // Not write_all_async: GJS frees the copied buffer before the write
+    // runs, saving freed memory. The input stream keeps the GBytes alive.
+    const file = await writeUnique(Gio.File.new_for_path(directory),
+        Gio.MemoryInputStream.new_from_bytes(bytes), Gio.FileCreateFlags.PRIVATE, cancellable, active);
+    return file.get_path();
 }

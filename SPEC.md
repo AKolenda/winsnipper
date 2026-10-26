@@ -38,7 +38,10 @@ frame, *before* we push a modal grab (a grab sends pointer-leave to apps and kil
 ### GSettings keys (`org.gnome.shell.extensions.winsnipper`)
 - `snip-shortcut` (as) default `['<Shift><Super>s']`
 - `save-to-disk` (b) default `true`
-- `save-directory` (s) default `''` → means `<XDG_PICTURES_DIR>/Screenshots` (create if missing)
+- `save-directory` (s) default `''` → means `<XDG_PICTURES_DIR>/Screenshots` (create if missing).
+  A Windows share (`\\server\share\dir`, read as `smb://server/share/dir`) or a non-`file` URI is a
+  network folder: the snip is written to `$XDG_CACHE_HOME/winsnipper/` as usual, then copied there in
+  the background, and copied again after each editor save (signalled by `SetClipboardImage`).
 - `toast-timeout` (i) default `7` seconds (0 = never auto-hide)
 - `default-mode` (s) default `'rectangle'` (one of rectangle|window|fullscreen)
 
