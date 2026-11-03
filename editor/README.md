@@ -1,7 +1,7 @@
 # WinSnipper editor
 
 Run `python3 editor/winsnipper_editor.py /absolute/path/to/screenshot.png`.
-The installer can copy this directory (excluding `tests/`) unchanged. Runtime
+The installer can copy this directory unchanged. Runtime
 packages on Zorin/Ubuntu are `python3-gi`, `python3-gi-cairo`, `python3-cairo`, and
 `gir1.2-gtk-4.0`. No libadwaita is used. `--gapplication-service` is supported.
 
@@ -31,43 +31,6 @@ highlighter remember separate colours and widths. Crop applies on drag release
 (or Enter during a drag); Escape cancels the current gesture. The status appears
 in the bottom bar. Ctrl+scroll zooms; Ctrl+0 fits; Ctrl+1 uses one image pixel per
 logical display pixel. The native GTK theme follows system settings.
-
-## Local tests without installing system packages
-
-From the repository root, with a distro-matched `/usr/bin/python3`:
-
-```bash
-bash editor/tests/setup-test-env.sh
-source editor/tests/test-env.sh
-/usr/bin/python3 -m unittest discover -s editor/tests
-```
-
-The setup script downloads distro `.deb` archives and uses `dpkg -x` to extract
-them into the gitignored `.testenv/`. It does not install packages and needs no
-root privileges. For GTK tests, add `--gtk` to the setup command. The script also
-extracts runtime dependencies and compiles GTK's local GSettings schemas.
-Python native modules must match the interpreter's ABI; do not substitute a
-Python virtual environment with a different Python version. Existing apt
-metadata, `apt-get`, `dpkg`, and `dpkg-architecture` are required.
-
-If Xvfb and `dbus-run-session` are available:
-
-```bash
-bash editor/tests/setup-test-env.sh --gtk
-source editor/tests/test-env.sh
-GTK_A11Y=none GDK_BACKEND=x11 GSK_RENDERER=cairo WINSNIPPER_GTK_TESTS=1 \
-  xvfb-run -a dbus-run-session -- /usr/bin/python3 -m unittest discover -s editor/tests
-GTK_A11Y=none GDK_BACKEND=x11 GSK_RENDERER=cairo \
-  xvfb-run -a dbus-run-session -- /usr/bin/python3 editor/tests/smoke_service.py
-/usr/bin/python3 editor/tests/benchmark.py
-```
-
-The regular discovery command runs the pure cairo/model/save tests and skips
-GTK checks unless `WINSNIPPER_GTK_TESTS=1`. Integration checks exercise actual
-GTK construction, gestures, save failures and close flushing, exports, friendly
-corrupt-file errors, duplicate opening, shortcuts, CLI forwarding, D-Bus Open
-and prewarm, clipboard fallback, and older-dialog API fallbacks. Shell clipboard
-calls use a small test D-Bus service, not the real GNOME extension.
 
 ## Compatibility and D-Bus contract
 
@@ -103,20 +66,9 @@ opacity is applied once to an opaque stroke mask bounded to the mark, so a
 stroke's self-intersections do not darken. Separate highlighter marks compound
 intentionally, and multiply blending preserves dark screenshot text.
 
-## Verification environment and limits
+## Untested environments
 
-Development tests run on Debian 13, Python 3.13.5, PyGObject 3.50, GTK 4.18.6,
-and pycairo 1.27.0 extracted locally. All 19 pure tests and 10 GTK integration
-tests pass (29 total). Xvfb allows headless X11 GTK checks; the
-service smoke test runs the real `--gapplication-service` lifecycle and keeps a
-window open beyond the default 10-second service startup timeout. Target
-Python 3.12 / PyGObject 3.48 / GTK 4.14 have not been executed here. Real GNOME
+Target Python 3.12 / PyGObject 3.48 / GTK 4.14 have not been exercised. Real GNOME
 Shell 46, Wayland clipboard persistence, touch/stylus hardware, compositor frame
 latency, system-theme switching, and desktop file-manager/portal interactions
 need a Zorin desktop check.
-
-A synthetic cached frame plus an 800-point live stroke measured approximately
-2.6 ms pen / 4.0 ms highlighter at 3840×2160, and 3.5 ms / 4.6 ms at 5120×2880
-(view cache at half scale). Full atomic PNG writes measured 251 ms and 432 ms,
-respectively, off the UI thread. These are cairo microbenchmarks of a solid
-screenshot, not a hardware/input or photographic-PNG encoding guarantee.

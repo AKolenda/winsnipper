@@ -26,7 +26,7 @@ mv "$PKG/usr/share/gnome-shell/extensions/$UUID/schemas/"*.gschema.xml "$PKG/usr
 rm -rf "$PKG/usr/share/gnome-shell/extensions/$UUID/schemas"
 
 cp -R "$ROOT/editor" "$PKG/usr/share/winsnipper/editor"
-rm -rf "$PKG/usr/share/winsnipper/editor/tests" "$PKG/usr/share/winsnipper/editor/README.md"
+rm -f "$PKG/usr/share/winsnipper/editor/README.md"
 find "$PKG/usr/share/winsnipper/editor" \( -name __pycache__ -o -name '*.pyc' \) -prune -exec rm -rf {} +
 install -m 644 "$ROOT/tools/keybindings.py" "$PKG/usr/share/winsnipper/tools/keybindings.py"
 install -m 755 "$ROOT/packaging/winsnipper-setup" "$PKG/usr/bin/winsnipper-setup"

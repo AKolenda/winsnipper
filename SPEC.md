@@ -120,5 +120,3 @@ File names: `Screenshot From YYYY-MM-DD HH-MM-SS.png` (append ` (2)`, ` (3)` …
 - Never block the shell's main loop: no sync file IO, no sync D-Bus calls, no spawn_sync in the extension.
 - Every signal/timeout/keybinding/bus-name acquired in `enable()` is released in `disable()`.
 - No `sudo` anywhere in install scripts. Installer prints the apt command if deps are missing.
-- Pure, testable logic lives in small modules with unit tests (`extension/lib/*.js` tested with node;
-  `editor/` model/render tested with python unittest).

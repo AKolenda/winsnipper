@@ -1,4 +1,4 @@
-// Pure stage-coordinate math. No GNOME imports: also consumed by node --test.
+// Pure stage-coordinate math. No GNOME imports.
 export function normalizeRect(x1, y1, x2, y2) {
     return {x: Math.min(x1, x2), y: Math.min(y1, y2),
         width: Math.abs(x2 - x1), height: Math.abs(y2 - y1)};

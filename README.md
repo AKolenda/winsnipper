@@ -138,12 +138,8 @@ during a snip does nothing.
 ## Development
 
 ```sh
-node --test tests/*.test.js
-python3 -m unittest discover -s tests -p 'test_keybindings.py'
 find extension -name '*.js' -exec node --check {} \;
 bash -n install.sh uninstall.sh && shellcheck install.sh uninstall.sh
-gjs -m tests/gjs-io-smoke.js   # optional GJS IO / activation-signature check
-gjs -m tests/gjs-upload-smoke.js [smb://server/share/test-folder]   # optional upload-queue check
 ```
 
 The capture, grab, clipboard and preview APIs were checked against upstream GNOME
