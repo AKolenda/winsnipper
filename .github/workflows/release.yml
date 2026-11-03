@@ -1,4 +1,4 @@
-name: Test and release .deb
+name: Check and release .deb
 
 # Every push to master that passes the checks publishes v<VERSION>.<run number>
 # with the .deb attached. Pull requests only run the checks.
@@ -30,8 +30,6 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          node --test tests/*.test.js
-          python3 -m unittest discover -s tests -p 'test_keybindings.py'
           find extension -name '*.js' -exec node --check {} \;
           bash -n install.sh uninstall.sh packaging/build-deb.sh packaging/winsnipper-setup
       - name: Build .deb

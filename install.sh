@@ -23,7 +23,7 @@ if "$DRY_RUN"; then
     printf '%s\n' \
         'Would check GNOME Shell >= 45, python3, PyGObject and Gtk 4.' \
         "Would copy extension/ to $EXTENSION_DIR and compile its schemas." \
-        "Would copy editor/ (excluding tests and __pycache__) to $EDITOR_DIR." \
+        "Would copy editor/ (excluding __pycache__) to $EDITOR_DIR." \
         "Would write launcher: $LAUNCHER" \
         "Would write desktop file: $DESKTOP" \
         "Would write D-Bus service: $SERVICE" \
@@ -62,7 +62,7 @@ mkdir -p "$EXTENSION_DIR" "$EDITOR_DIR" "$HOME/.local/bin" "$(dirname -- "$DESKT
 cp -R "$SCRIPT_DIR/extension/." "$EXTENSION_DIR/"
 glib-compile-schemas "$EXTENSION_DIR/schemas"
 cp "$SCRIPT_DIR/tools/keybindings.py" "$DATA_DIR/tools/keybindings.py"
-# Copy every editor module/asset, excluding test and bytecode directories.
+# Copy every editor module/asset, excluding bytecode directories.
 python3 - "$SCRIPT_DIR/editor" "$EDITOR_DIR" "$LAUNCHER" "$DESKTOP" "$SERVICE" <<'PY'
 from pathlib import Path
 import shlex
@@ -71,7 +71,7 @@ import sys
 
 source, destination, launcher, desktop, service = map(Path, sys.argv[1:])
 shutil.copytree(source, destination, dirs_exist_ok=True,
-                ignore=shutil.ignore_patterns('tests', '__pycache__', '*.pyc'))
+                ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
 entry = destination / 'winsnipper_editor.py'
 launcher.write_text('#!/usr/bin/env bash\nset -euo pipefail\nexec python3 ' + shlex.quote(str(entry)) + ' "$@"\n')
 launcher.chmod(0o755)
