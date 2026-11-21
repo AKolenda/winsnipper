@@ -69,7 +69,7 @@ class EditorWindow(Gtk.ApplicationWindow):
             "fit": self.fit, "actual-size": lambda: self.set_zoom(1.0),
             "folder": self.open_folder,
         }
-        for tool in ("pen", "highlighter", "eraser", "crop"):
+        for tool in ("pen", "highlighter", "redact", "eraser", "crop"):
             callbacks[tool] = lambda selected=tool: self.select_tool(selected)
         for name, callback in callbacks.items():
             action = Gio.SimpleAction.new(name, None)
@@ -91,7 +91,8 @@ class EditorWindow(Gtk.ApplicationWindow):
         self.tool_buttons = {}
         first = None
         for name, label, shortcut in (("pen", "Pen", "P"), ("highlighter", "Highlighter", "H"),
-                                      ("eraser", "Eraser", "E"), ("crop", "Crop", "X")):
+                                      ("redact", "Redact", "R"), ("eraser", "Eraser", "E"),
+                                      ("crop", "Crop", "X")):
             button = Gtk.ToggleButton(label=label)
             button.set_tooltip_text(f"{label} ({shortcut})")
             if first is None:
@@ -318,7 +319,7 @@ class EditorWindow(Gtk.ApplicationWindow):
         if self._drag_start is None:
             return
         point = self._image_point(self._drag_start[0] + dx, self._drag_start[1] + dy)
-        if self._drag_tool == "crop":
+        if self._drag_tool in ("crop", "redact"):
             self._crop_end = point
         elif self._drag_tool == "eraser":
             self._erase_at(self._points[-1], point)
@@ -372,6 +373,12 @@ class EditorWindow(Gtk.ApplicationWindow):
             changed = self.document.erase_indices(self._removed)
             if changed:
                 self.cache.invalidate()
+        elif self._drag_tool == "redact":
+            stroke = self._redaction()
+            if stroke is not None:
+                changed = self.document.add_stroke(stroke)
+                if changed:
+                    self.cache.append(before, self.document.state, stroke)
         elif self._drag_tool == "crop":
             rect = self.document.state.crop.selection(self._points[0], self._crop_end)
             if rect is not None and rect.width * self.zoom >= 4 and rect.height * self.zoom >= 4:
@@ -383,6 +390,13 @@ class EditorWindow(Gtk.ApplicationWindow):
         else:
             self._update_actions()
             self.area.queue_draw()
+
+    def _redaction(self):
+        """The dragged box in whole image pixels, or None for a stray click."""
+        rect = self.document.state.crop.selection(self._points[0], self._crop_end)
+        if rect is None or rect.width * self.zoom < 3 or rect.height * self.zoom < 3:
+            return None
+        return Stroke(((rect.x, rect.y), (rect.right, rect.bottom)), (0.0, 0.0, 0.0), 1.0, "redact")
 
     def _reset_drag(self):
         self._live_highlighter = None
@@ -472,7 +486,8 @@ class EditorWindow(Gtk.ApplicationWindow):
 
     def _draw_color(self, _area, context, _width, _height):
         context.translate(-2, -2)
-        self._paint_swatch(context, self.colors.get(self.tool, self.colors["pen"]))
+        color = (0.0, 0.0, 0.0) if self.tool == "redact" else self.colors.get(self.tool, self.colors["pen"])
+        self._paint_swatch(context, color)
 
     def _choose_color(self, color):
         if self.tool in self.colors:

@@ -104,7 +104,22 @@ def stroke_path(context, stroke):
     return True
 
 
+def redaction_rect(stroke):
+    (x1, y1), (x2, y2) = stroke.points
+    return Rect(min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1))
+
+
 def draw_stroke(context, stroke):
+    if stroke.tool == "redact":
+        # Opaque and pixel-aligned, so no antialiased edge lets content show through.
+        box = redaction_rect(stroke)
+        context.save()
+        context.set_antialias(cairo.ANTIALIAS_NONE)
+        context.set_source_rgb(*stroke.color)
+        context.rectangle(box.x, box.y, box.width, box.height)
+        context.fill()
+        context.restore()
+        return
     context.save()
     context.set_line_width(stroke.width)
     context.set_line_cap(cairo.LINE_CAP_ROUND)
@@ -390,6 +405,17 @@ def _clip_segment(a, b, rect):
 def hit_stroke(stroke, start, end=None, radius=6.0, crop=None, flattened=None, bounds=None):
     """Hit a swept eraser segment, including sparse/fast pointer events."""
     end = start if end is None else end
+    if stroke.tool == "redact":
+        # A box is hit anywhere inside its visible area, not only on its outline.
+        box = redaction_rect(stroke)
+        if crop is not None:
+            box = Rect(max(box.x, crop.x), max(box.y, crop.y),
+                       min(box.right, crop.right) - max(box.x, crop.x),
+                       min(box.bottom, crop.bottom) - max(box.y, crop.y))
+            if box.width <= 0 or box.height <= 0:
+                return False
+        reach = Rect(box.x - radius, box.y - radius, box.width + radius * 2, box.height + radius * 2)
+        return _clip_segment(start, end, reach) is not None
     reach = radius + stroke.width / 2 + 0.5  # bound on curve flattening error
     points = flattened if flattened is not None else flattened_points(stroke)
     bounds = stroke_bounds(stroke, points) if bounds is None else bounds
