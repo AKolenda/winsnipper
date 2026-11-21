@@ -104,10 +104,11 @@ File names: `Screenshot From YYYY-MM-DD HH-MM-SS.png` (append ` (2)`, ` (3)` …
 
 ### Editor (Python, GTK 4, no libadwaita requirement)
 - Opens the PNG, window sized to image (max ~85% of monitor), image fit-to-window.
-- Tools: Pen, Highlighter, Eraser (stroke eraser — removes whole strokes it touches), Crop.
+- Tools: Pen (default on every open), Highlighter, Redact (drag an opaque black box; flattened into
+  the saved PNG), Eraser (stroke eraser — removes whole strokes and boxes it touches), Crop.
   Colour palette (≈8 swatches + custom), thickness choice. Undo/Redo. Copy. Save As. Open folder.
 - Shortcuts: Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo, Ctrl+C copy, Ctrl+S save-as, Ctrl+W close,
-  P/H/E/X(crop) tools, Ctrl+0 fit, Ctrl+1 100%, Ctrl+scroll zoom.
+  P/H/R/E/X(crop) tools, Ctrl+0 fit, Ctrl+1 100%, Ctrl+scroll zoom.
 - Auto-save: after every completed edit (stroke end, erase, undo, redo, crop) debounce ~250 ms,
   render full-resolution PNG off the UI thread, write atomically (tmp file + os.replace) over the
   same path, then call Shell `SetClipboardImage(path)`; on failure fall back to `Gdk.Clipboard.set_texture`.

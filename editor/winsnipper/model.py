@@ -37,6 +37,7 @@ class Rect:
 
 @dataclass(frozen=True)
 class Stroke:
+    """A pen or highlighter path, or a redaction box given by two corners."""
     points: tuple[Point, ...]
     color: Color = (1.0, 0.0, 0.0)
     width: float = 4.0
@@ -45,8 +46,10 @@ class Stroke:
     def __post_init__(self):
         if not self.points or self.width <= 0:
             raise ValueError("A stroke needs points and a positive width")
-        if self.tool not in ("pen", "highlighter"):
+        if self.tool not in ("pen", "highlighter", "redact"):
             raise ValueError("Unknown drawing tool")
+        if self.tool == "redact" and len(self.points) != 2:
+            raise ValueError("A redaction needs two opposite corners")
         if not all(math.isfinite(v) for point in self.points for v in point):
             raise ValueError("Stroke points must be finite")
         if len(self.color) != 3 or not all(0 <= v <= 1 for v in self.color):

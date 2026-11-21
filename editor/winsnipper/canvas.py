@@ -98,6 +98,13 @@ class Canvas(Gtk.Widget):
                            bounds.width * w.zoom, bounds.height * w.zoom)
         elif w._points and w._drag_tool == 'crop' and w._crop_end is not None:
             overlay = image_bounds
+        elif w._points and w._drag_tool == 'redact' and w._crop_end is not None:
+            stroke = w._redaction()
+            if stroke is not None:
+                bounds = stroke_bounds(stroke, padding=1 / w.zoom)
+                overlay = Rect(ox + (bounds.x - crop.x) * w.zoom,
+                               oy + (bounds.y - crop.y) * w.zoom,
+                               bounds.width * w.zoom, bounds.height * w.zoom)
         # Bound CPU rasterization to both the live region and the viewport.
         if overlay is not None:
             h, v = w.scroller.get_hadjustment(), w.scroller.get_vadjustment()
@@ -119,7 +126,7 @@ class Canvas(Gtk.Widget):
             context.translate(-crop.x, -crop.y)
             if live is not None:
                 live.draw(context, multiply=False)
-            elif w._drag_tool == 'pen':
+            elif w._drag_tool in ('pen', 'redact'):
                 draw_stroke(context, stroke)
             else:
                 selected = crop.selection(w._points[0], w._crop_end)

@@ -42,7 +42,7 @@ class EditorApplication(Gtk.Application):
             "win.copy": ["<Primary>c"],
             "win.save-as": ["<Primary>s"],
             "win.close": ["<Primary>w"],
-            "win.pen": ["p"], "win.highlighter": ["h"],
+            "win.pen": ["p"], "win.highlighter": ["h"], "win.redact": ["r"],
             "win.eraser": ["e"], "win.crop": ["x"],
             "win.fit": ["<Primary>0"], "win.actual-size": ["<Primary>1"],
         }.items():

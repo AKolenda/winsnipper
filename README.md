@@ -18,7 +18,8 @@ Supports GNOME Shell 45–49 on Wayland and X11. Built for Zorin OS 18 (GNOME 46
   `Pictures/Screenshots`. The clipboard image survives after the editor closes.
 - **Notification toast.** A preview appears in the bottom-right corner. Click it
   to annotate.
-- **Lightweight editor** (GTK 4): pen, highlighter, eraser and crop, with undo/redo.
+- **Lightweight editor** (GTK 4): pen, highlighter, redaction boxes, eraser and crop,
+  with undo/redo. The pen is always selected when the editor opens.
   Your edits save back to the same file automatically.
 - **HiDPI aware.** Crops are taken at the capture scale, so snips stay sharp on
   scaled displays.
@@ -33,7 +34,7 @@ Supports GNOME Shell 45–49 on Wayland and X11. Built for Zorin OS 18 (GNOME 46
 
 | Action | Shortcut |
 | --- | --- |
-| Pen / Highlighter / Eraser / Crop | <kbd>P</kbd> / <kbd>H</kbd> / <kbd>E</kbd> / <kbd>X</kbd> |
+| Pen / Highlighter / Redact / Eraser / Crop | <kbd>P</kbd> / <kbd>H</kbd> / <kbd>R</kbd> / <kbd>E</kbd> / <kbd>X</kbd> |
 | Apply crop | <kbd>Enter</kbd> |
 | Cancel the current stroke or crop | <kbd>Esc</kbd> |
 | Undo / Redo | <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> or <kbd>Ctrl</kbd>+<kbd>Y</kbd> |
